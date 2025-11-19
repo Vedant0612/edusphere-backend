@@ -1,3 +1,5 @@
+
+//// second
 // src/server.js
 require('dotenv').config();
 const express = require('express');
@@ -15,17 +17,30 @@ app.get('/', (req, res) => {
   res.json({ 
     message: 'Internship Platform API',
     status: 'running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      auth: '/api/auth',
+      users: '/api/users',
+      students: '/api/students',
+      internships: '/api/internships',
+      applications: '/api/applications'
+    }
   });
 });
 
 // Import routes
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
+const studentRoutes = require('./routes/students');
+const internshipRoutes = require('./routes/internships');
+
 
 // Use routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/students', studentRoutes);
+app.use('/api/internships', internshipRoutes);
+
 
 // Error handling
 app.use((err, req, res, next) => {
@@ -36,4 +51,12 @@ app.use((err, req, res, next) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📚 API Endpoints:`);
+  console.log(`   - POST /api/auth/register`);
+  console.log(`   - POST /api/auth/login`);
+  console.log(`   - GET  /api/students`);
+  console.log(`   - POST /api/students`);
+  console.log(`   - GET  /api/internships`);
+  console.log(`   - POST /api/internships`);
+
 });
