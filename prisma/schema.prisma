@@ -1,0 +1,99 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// IMAGE 3: BASIC WORKSPACE SYSTEM (TODAY ONLY)
+// ============================================
+
+model User {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  password    String
+  teamRole    String?  @map("team_role")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relationships
+  workspaces  Workspace[]
+  invites     Invite[]
+  teams       Team[]
+  chats       Chat[]
+
+  @@map("users")
+}
+
+model Workspace {
+  id        String   @id @default(uuid())
+  createdAt DateTime @default(now()) @map("created_at")
+  folderId  String?  @map("folder_id")
+  teamId    String?  @map("team_id")
+  userId    String   @map("user_id")
+
+  // Relationships
+  user   User    @relation(fields: [userId], references: [id])
+  folder Folder? @relation(fields: [folderId], references: [id])
+  team   Team?   @relation(fields: [teamId], references: [id])
+  chats  Chat[]
+  invites Invite[]
+
+  @@map("workspaces")
+}
+
+model Folder {
+  id   String @id @default(uuid())
+  name String
+
+  // Relationships
+  workspaces Workspace[]
+
+  @@map("folders")
+}
+
+model Team {
+  id   String @id @default(uuid())
+  name String
+
+  // Relationships
+  workspaces Workspace[]
+  users      User[]
+
+  @@map("teams")
+}
+
+model Invite {
+  id          String  @id @default(uuid())
+  inviteId    String  @unique @map("invite_id")
+  workspaceId String  @map("workspace_id")
+  type        String
+  inviterId   String  @map("inviter_id")
+
+  // Relationships
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  inviter   User      @relation(fields: [inviterId], references: [id])
+
+  @@map("invites")
+}
+
+model Chat {
+  id          String    @id @default(uuid())
+  duration    Int?
+  startedAt   DateTime? @map("started_at")
+  endedAt     DateTime? @map("ended_at")
+  workspaceId String    @map("workspace_id")
+  userId      String    @map("user_id")
+
+  // Relationships
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@map("chats")
+}
