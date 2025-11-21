@@ -1,0 +1,390 @@
+// --------------------------------------------------
+//  PRISMA SCHEMA FOR POSTGRES — SIH PROJECT
+// --------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --------------------------------------------------
+// ENUMS
+// --------------------------------------------------
+
+enum CourseType {
+  PAID
+  FREE
+  GOVT
+}
+
+enum role {
+  STUDENT
+  INSTITUTE_ADMIN
+  MENTOR
+  INDUSTRY_USER
+  FACULTY
+  ADMIN
+}
+
+enum MentorSessionStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum InternshipStatus {
+  APPLIED
+  SHORTLISTED
+  SELECTED
+  REJECTED
+}
+
+// --------------------------------------------------
+// USERS
+// --------------------------------------------------
+
+model users {
+  id           String @id @default(uuid()) @db.Uuid
+  displayName  String
+  role         role // array of role strings
+  email        String @unique
+  salt         String
+  phone        String
+  hashPassword String
+
+  // Relations
+  profiles                 profile?
+  institutions_admin       institutions[]      @relation("InstitutionAdmin")
+  courseEnrollments        courseEnrollments[]
+  courses_instructor       courses[]
+  mentors                  mentors?
+  facultyProfile           faculty?
+  internships_industryUser internships[]
+
+  user_notifications user_notifications[]
+}
+
+// --------------------------------------------------
+// INSTITUTIONS
+// --------------------------------------------------
+
+model institutions {
+  id            String   @id @default(uuid()) @db.Uuid
+  instituteName String
+  state         String
+  adminUserId   String   @db.Uuid
+  createdAt     DateTime
+
+  // Relations
+  adminUser users     @relation("InstitutionAdmin", fields: [adminUserId], references: [id])
+  profiles  profile[]
+  faculty   faculty[]
+}
+
+// --------------------------------------------------
+// PROFILE
+// --------------------------------------------------
+
+model profile {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @unique @db.Uuid
+  bio         String?
+  gender      String?
+  DOB         DateTime?
+  avatarURL   String?
+  github      String?
+  linkedin    String?
+  skills      String[]
+  interests   String[]
+  department  String?
+  resourceId  String?
+  instituteId String    @db.Uuid
+  facultyId   String?   @db.Uuid
+
+  // Relations
+  user        users        @relation(fields: [userId], references: [id])
+  institution institutions @relation(fields: [instituteId], references: [id])
+  faculty     faculty?     @relation(fields: [facultyId], references: [id])
+
+  learningProgress       studentLearningProgress[]
+  mentorSessions         mentorSessions[]
+  mentorReviews          mentorReviews[]
+  credits                credits[]
+  certificates           certificates[]
+  portfolioProjects      portfolioProjects[]
+  internshipApplications internship_applications[]
+}
+
+// --------------------------------------------------
+// ROADMAPS & CHECKPOINTS
+// --------------------------------------------------
+
+model roadmaps {
+  id          String @id @default(uuid()) @db.Uuid
+  title       String
+  description String
+  domain      String
+
+  checkpoints checkpoints[]
+}
+
+model checkpoints {
+  id           String @id @default(uuid()) @db.Uuid
+  roadmapId    String @db.Uuid
+  title        String
+  description  String
+  resourceType String
+  resourceUrl  String
+
+  roadmap  roadmaps                  @relation(fields: [roadmapId], references: [id])
+  progress studentLearningProgress[]
+}
+
+// --------------------------------------------------
+// STUDENT LEARNING PROGRESS
+// --------------------------------------------------
+
+model studentLearningProgress {
+  id           String    @id @default(uuid()) @db.Uuid
+  profileId    String    @db.Uuid
+  checkpointId String    @db.Uuid
+  isCompleted  Boolean
+  completedAt  DateTime?
+
+  profile    profile     @relation(fields: [profileId], references: [id])
+  checkpoint checkpoints @relation(fields: [checkpointId], references: [id])
+}
+
+// --------------------------------------------------
+// COURSES
+// --------------------------------------------------
+
+model courses {
+  id            String     @id @default(uuid()) @db.Uuid
+  title         String
+  description   String
+  type          CourseType
+  price         Float?
+  instructorId  String     @db.Uuid
+  thumbnail_url String?
+  created_at    DateTime
+
+  instructor  users               @relation(fields: [instructorId], references: [id])
+  enrollments courseEnrollments[]
+}
+
+// --------------------------------------------------
+// COURSE ENROLLMENTS
+// --------------------------------------------------
+
+model courseEnrollments {
+  id              String   @id @default(uuid()) @db.Uuid
+  courseId        String   @db.Uuid
+  userId          String   @db.Uuid
+  progressPercent Float?
+  enrolledAt      DateTime
+
+  course courses @relation(fields: [courseId], references: [id])
+  user   users   @relation(fields: [userId], references: [id])
+}
+
+// --------------------------------------------------
+// MENTORS + SESSIONS + REVIEWS
+// --------------------------------------------------
+
+model mentors {
+  id        String  @id @default(uuid()) @db.Uuid
+  user_id   String  @unique @db.Uuid
+  expertise Json?
+  rating    Float?
+  bio       String?
+
+  user     users            @relation(fields: [user_id], references: [id])
+  sessions mentorSessions[]
+  reviews  mentorReviews[]
+}
+
+model mentorSessions {
+  id           String              @id @default(uuid()) @db.Uuid
+  studentId    String              @db.Uuid
+  mentorId     String              @db.Uuid
+  scheduled_at DateTime
+  status       MentorSessionStatus
+  meeting_link String?
+
+  student profile @relation(fields: [studentId], references: [id])
+  mentor  mentors @relation(fields: [mentorId], references: [id])
+}
+
+model mentorReviews {
+  id        String  @id @default(uuid()) @db.Uuid
+  mentorId  String  @db.Uuid
+  rating    Float
+  reviews   String?
+  studentId String  @db.Uuid
+
+  mentor  mentors @relation(fields: [mentorId], references: [id])
+  student profile @relation(fields: [studentId], references: [id])
+}
+
+// --------------------------------------------------
+// PORTFOLIO PROJECTS
+// --------------------------------------------------
+
+model portfolioProjects {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String   @db.Uuid
+  title       String
+  description String?
+  github_url  String?
+  live_url    String?
+  tags        String[]
+
+  user profile @relation(fields: [user_id], references: [id])
+}
+
+// --------------------------------------------------
+// INTERNSHIPS
+// --------------------------------------------------
+
+model internships {
+  id               String   @id @default(uuid()) @db.Uuid
+  industry_user_id String   @db.Uuid
+  title            String
+  description      String
+  type             String
+  stipend          Float?
+  location         String
+  required_skills  Json
+  duration_weeks   Int
+  created_at       DateTime
+
+  industryUser users                     @relation(fields: [industry_user_id], references: [id])
+  applications internship_applications[]
+}
+
+// --------------------------------------------------
+// INTERNSHIP APPLICATIONS
+// --------------------------------------------------
+
+model internship_applications {
+  id             String           @id @default(uuid()) @db.Uuid
+  internship_id  String           @db.Uuid
+  student_id     String           @db.Uuid
+  status         InternshipStatus
+  submission_url String?
+  score          Float?
+  applied_at     DateTime
+
+  internship     internships             @relation(fields: [internship_id], references: [id])
+  student        profile                 @relation(fields: [student_id], references: [id])
+  logbookEntries logbook_entries[]
+  evaluations    internship_evaluation[]
+}
+
+// --------------------------------------------------
+// LOGBOOK ENTRIES
+// --------------------------------------------------
+
+model logbook_entries {
+  id            String   @id @default(uuid()) @db.Uuid
+  applicationId String   @db.Uuid
+  date          DateTime
+  taskDone      String
+  proofUrl      String?
+  hours_spent   Int
+
+  application internship_applications @relation(fields: [applicationId], references: [id])
+}
+
+// --------------------------------------------------
+// INTERNSHIP EVALUATION
+// --------------------------------------------------
+
+model internship_evaluation {
+  id             String  @id @default(uuid()) @db.Uuid
+  application_id String  @db.Uuid
+  faculty_id     String  @db.Uuid
+  rubric_json    Json?
+  comments       String?
+  final_score    Float?
+
+  application internship_applications @relation(fields: [application_id], references: [id])
+  faculty     faculty                 @relation(fields: [faculty_id], references: [id])
+}
+
+// --------------------------------------------------
+// FACULTY
+// --------------------------------------------------
+
+model faculty {
+  id          String @id @default(uuid()) @db.Uuid
+  instituteId String @db.Uuid
+  userId      String @unique @db.Uuid
+  name        String
+  department  String
+
+  institution institutions            @relation(fields: [instituteId], references: [id])
+  user        users                   @relation(fields: [userId], references: [id])
+  students    profile[]
+  evaluations internship_evaluation[]
+}
+
+// --------------------------------------------------
+// CREDITS
+// --------------------------------------------------
+
+model credits {
+  id             String @id @default(uuid()) @db.Uuid
+  student_id     String @db.Uuid
+  credits_earned Float
+
+  student profile @relation(fields: [student_id], references: [id])
+}
+
+// --------------------------------------------------
+// CERTIFICATES
+// --------------------------------------------------
+
+model certificates {
+  id             String   @id @default(uuid()) @db.Uuid
+  student_id     String   @db.Uuid
+  title          String
+  certificateUrl String
+  issuedAt       DateTime
+
+  student profile @relation(fields: [student_id], references: [id])
+}
+
+// --------------------------------------------------
+// NOTIFICATIONS
+// --------------------------------------------------
+
+model notifications {
+  id         String   @id @default(uuid()) @db.Uuid
+  title      String
+  message    String
+  created_at DateTime
+
+  userNotifications user_notifications[]
+}
+
+// --------------------------------------------------
+// USER NOTIFICATIONS (MANY-TO-MANY LINK TABLE)
+// --------------------------------------------------
+
+model user_notifications {
+  id              String    @id @default(uuid()) @db.Uuid
+  user_id         String    @db.Uuid
+  notification_id String    @db.Uuid
+  isRead          Boolean
+  read_at         DateTime?
+
+  user         users         @relation(fields: [user_id], references: [id])
+  notification notifications @relation(fields: [notification_id], references: [id])
+}
