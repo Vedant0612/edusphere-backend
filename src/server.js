@@ -31,7 +31,9 @@ app.get('/', (req, res) => {
       users: '/api/users',
       students: '/api/students',
       internships: '/api/internships',
-      applications: '/api/applications'
+      applications: '/api/applications',
+       roadmaps: '/roadmaps',                    
+      internshipManagement: '/internship-management'  
     }
   });
 });
@@ -41,6 +43,8 @@ const userRoutes = require('./routes/users');
 
 const internshipRoutes = require('./routes/internships');
 const applicationRoutes = require('./routes/applications');
+const roadmapsRouter = require('./routes/roadmaps.routes');
+const internshipMgmtRouter = require('./routes/internship-management.routes');
 //to avoid merge conflicts i have imported ur stuff...
 
 //worked on these routes properly working 
@@ -53,7 +57,8 @@ app.use('/faculty', facultyRouter);
 app.use('/internships', internshipRoutes);
 app.use('/users', userRoutes);
 app.use('/applications', applicationRoutes);
-
+app.use('/roadmaps', roadmapsRouter);
+app.use('/internship-management', internshipMgmtRouter);
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
