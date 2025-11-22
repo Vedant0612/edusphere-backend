@@ -1,473 +1,274 @@
-// prisma/schema.prisma
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// ============================================
-// USER & WORKSPACE MODELS
-// ============================================
-
-model User {
-  id          String   @id @default(uuid())
-  name        String
-  email       String   @unique
-  password    String
-  teamRole    String?  @map("team_role")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  
-  // GitHub Integration Fields
-  githubUsername    String?   @map("github_username")
-  githubToken       String?   @map("github_token")
-  githubConnectedAt DateTime? @map("github_connected_at")
-  lastGithubSync    DateTime? @map("last_github_sync")
-  
-  // File Upload Fields
-  profilePictureUrl String?   @map("profile_picture_url")
-  resumeUrl         String?   @map("resume_url")
-
-  // Relationships
-  workspaces           Workspace[]
-  invites              Invite[]
-  teams                Team[]
-  chats                Chat[]
-  documents            Document[]
-  student              Student?
-  mentorSessions       MentorSession[] @relation("MentorSessions")
-  evaluationsGiven     InternshipEvaluation[] @relation("EvaluatorEvaluations")
-
-  @@map("users")
+model users {
+  id                       String               @id @default(uuid())
+  displayName              String
+  role                     String[]
+  email                    String               @unique
+  salt                     String
+  phone                    String
+  hashPassword             String
+  courseEnrollments        courseEnrollments[]
+  courses_instructor       courses[]
+  facultyProfile           faculty?
+  institutions_admin       institutions[]       @relation("InstitutionAdmin")
+  internships_industryUser internships[]
+  mentors                  mentors?
+  profiles                 profile?
+  user_notifications       user_notifications[]
 }
 
-model Workspace {
-  id        String   @id @default(uuid())
-  createdAt DateTime @default(now()) @map("created_at")
-  folderId  String?  @map("folder_id")
-  teamId    String?  @map("team_id")
-  userId    String   @map("user_id")
-
-  user    User      @relation(fields: [userId], references: [id])
-  folder  Folder?   @relation(fields: [folderId], references: [id])
-  team    Team?     @relation(fields: [teamId], references: [id])
-  chats   Chat[]
-  invites Invite[]
-
-  @@map("workspaces")
-}
-
-model Folder {
-  id         String      @id @default(uuid())
-  name       String
-  workspaces Workspace[]
-
-  @@map("folders")
-}
-
-model Team {
-  id         String      @id @default(uuid())
-  name       String
-  workspaces Workspace[]
-  users      User[]
-
-  @@map("teams")
-}
-
-model Invite {
-  id          String    @id @default(uuid())
-  inviteId    String    @unique @map("invite_id")
-  workspaceId String    @map("workspace_id")
-  type        String
-  inviterId   String    @map("inviter_id")
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id])
-  inviter   User      @relation(fields: [inviterId], references: [id])
-
-  @@map("invites")
-}
-
-model Chat {
-  id          String    @id @default(uuid())
-  duration    Int?
-  startedAt   DateTime? @map("started_at")
-  endedAt     DateTime? @map("ended_at")
-  workspaceId String    @map("workspace_id")
-  userId      String    @map("user_id")
-
-  workspace Workspace @relation(fields: [workspaceId], references: [id])
-  user      User      @relation(fields: [userId], references: [id])
-
-  @@map("chats")
-}
-
-// ============================================
-// STUDENT & PROFILE MODELS
-// ============================================
-
-model Student {
-  id          String    @id @default(uuid())
-  userId      String    @unique @map("user_id")
-  rollNumber  String?   @unique @map("roll_number")
-  department  String?
-  semester    Int?
-  cgpa        Float?
-  dateOfBirth DateTime? @map("date_of_birth")
-  phone       String?
-  approved    Boolean   @default(false)
-  approvedAt  DateTime? @map("approved_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  // Relationships
-  user                 User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  profile              Profile?
-  applications         InternshipApplication[]
-  enrollments          CourseEnrollment[]
-  projects             PortfolioProject[]
-  mentorSessions       MentorSession[]
-  reviews              MentorReview[]
-  logbookEntries       LogbookEntry[]
-  certificates         Certificate[]
-  learningProgress     StudentLearningProgress[]
-  certifications       Certification[]
-  studentSkills        StudentSkill[]
-  cvGenerations        CVGeneration[]
-
-  @@map("students")
-}
-
-model Profile {
-  id         String    @id @default(uuid())
-  studentId  String    @unique @map("student_id")
-  bio        String?
-  gender     String?
-  dob        DateTime?
-  avatarUrl  String?   @map("avatar_url")
-  github     String?
-  linkedin   String?
-  skills     String?   // JSON array stored as string
-  interests  String?   // JSON array stored as string
-  resumeUrl  String?   @map("resume_url")
-  department String?
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("profiles")
-}
-
-// ============================================
-// INTERNSHIP MODELS
-// ============================================
-
-model Internship {
-  id                  String    @id @default(uuid())
-  title               String
-  description         String
-  companyName         String    @map("company_name")
-  location            String
-  type                String    // remote, onsite, hybrid
-  duration            Int       // in weeks
-  stipend             Int?
-  requiredSkills      String    // JSON array as string
-  startDate           DateTime? @map("start_date")
-  endDate             DateTime? @map("end_date")
-  applicationDeadline DateTime? @map("application_deadline")
-  isActive            Boolean   @default(true) @map("is_active")
-  postedBy            String    @map("posted_by")
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
-
-  applications InternshipApplication[]
-  evaluations  InternshipEvaluation[]
-
-  @@map("internships")
-}
-
-model InternshipApplication {
-  id              String    @id @default(uuid())
-  studentId       String    @map("student_id")
-  internshipId    String    @map("internship_id")
-  status          String    @default("pending") // pending, accepted, rejected, withdrawn
-  coverLetter     String?   @map("cover_letter")
-  resumeUrl       String?   @map("resume_url")
-  appliedAt       DateTime  @default(now()) @map("applied_at")
-  reviewedAt      DateTime? @map("reviewed_at")
-  rejectionReason String?   @map("rejection_reason")
-
-  student    Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  internship Internship @relation(fields: [internshipId], references: [id], onDelete: Cascade)
-
-  @@unique([studentId, internshipId])
-  @@map("internship_applications")
-}
-
-model InternshipEvaluation {
-  id           String   @id @default(uuid())
-  internshipId String   @map("internship_id")
-  evaluatorId  String   @map("evaluator_id")
-  facultyId    String   @map("faculty_id")
-  rubricJson   String   @map("rubric_json") // JSON stored as string
-  comments     String?
-  finalScore   Float    @map("final_score")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  internship Internship @relation(fields: [internshipId], references: [id], onDelete: Cascade)
-  evaluator  User       @relation("EvaluatorEvaluations", fields: [evaluatorId], references: [id])
-
-  @@map("internship_evaluations")
-}
-
-// ============================================
-// COURSE MODELS
-// ============================================
-
-model Course {
-  id           String   @id @default(uuid())
-  title        String
-  description  String
-  type         String   // technical, soft_skill, domain
-  price        Float?
-  thumbnail    String?
-  instructorId String   @map("instructor_id")
-  thumbnailUrl String?  @map("thumbnail_url")
-  createdAt    DateTime @default(now()) @map("created_at")
-
-  enrollments CourseEnrollment[]
-  checkpoints Checkpoint[]
-
-  @@map("courses")
-}
-
-model CourseEnrollment {
-  id              String    @id @default(uuid())
-  studentId       String    @map("student_id")
-  courseId        String    @map("course_id")
-  enrolledAt      DateTime  @default(now()) @map("enrolled_at")
-  progressPercent Int       @default(0) @map("progress_percent")
-  completedAt     DateTime? @map("completed_at")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  course  Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
-
-  @@unique([studentId, courseId])
-  @@map("course_enrollments")
-}
-
-model Checkpoint {
-  id          String  @id @default(uuid())
-  courseId    String  @map("course_id")
-  title       String
-  description String?
-  resourceUrl String? @map("resource_url")
-
-  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
-
-  @@map("checkpoints")
-}
-
-// ============================================
-// PORTFOLIO & PROJECTS
-// ============================================
-
-model PortfolioProject {
-  id           String    @id @default(uuid())
-  studentId    String    @map("student_id")
-  title        String
-  description  String
-  githubUrl    String?   @map("github_url")
-  liveUrl      String?   @map("live_url")
-  tags         String?   // JSON array as string
-  createdAt    DateTime  @default(now()) @map("created_at")
-  
-  // GitHub Integration Fields
-  source       String    @default("manual") // manual, github
-  githubRepoId String?   @map("github_repo_id")
-  lastSyncedAt DateTime? @map("last_synced_at")
-  stars        Int       @default(0)
-  forks        Int       @default(0)
-  language     String?
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("portfolio_projects")
-}
-
-// ============================================
-// MENTOR & SESSIONS
-// ============================================
-
-model MentorSession {
-  id          String    @id @default(uuid())
-  studentId   String    @map("student_id")
-  mentorId    String    @map("mentor_id")
-  scheduledAt DateTime  @map("scheduled_at")
-  status      String    @default("scheduled") // scheduled, completed, cancelled
-  meetingLink String?   @map("meeting_link")
-  createdAt   DateTime  @default(now()) @map("created_at")
-
-  student Student        @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  mentor  User           @relation("MentorSessions", fields: [mentorId], references: [id])
-  reviews MentorReview[]
-
-  @@map("mentor_sessions")
-}
-
-model MentorReview {
-  id        String  @id @default(uuid())
-  sessionId String  @map("session_id")
-  studentId String  @map("student_id")
-  rating    Float
-  review    String?
-
-  session MentorSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  student Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("mentor_reviews")
-}
-
-// ============================================
-// LOGBOOK & CERTIFICATES
-// ============================================
-
-model LogbookEntry {
-  id          String   @id @default(uuid())
-  studentId   String   @map("student_id")
-  date        DateTime
-  task        String
-  hours       Int
-  description String
-  proofUrl    String?  @map("proof_url")
-  createdAt   DateTime @default(now()) @map("created_at")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("logbook_entries")
-}
-
-model Certificate {
-  id             String   @id @default(uuid())
-  studentId      String   @map("student_id")
-  title          String
-  issuedAt       DateTime @default(now()) @map("issued_at")
-  certificateUrl String   @map("certificate_url")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("certificates")
-}
-
-// ============================================
-// LEARNING PROGRESS & ROADMAP
-// ============================================
-
-model StudentLearningProgress {
-  id           String    @id @default(uuid())
-  studentId    String    @map("student_id")
-  profileId    String    @map("profile_id")
-  isCompleted  Boolean   @default(false) @map("is_completed")
-  completedAt  DateTime? @map("completed_at")
-  checkpointId String    @map("checkpoint_id")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("student_learning_progress")
-}
-
-model Roadmap {
-  id          String  @id @default(uuid())
-  title       String
-  description String?
-  domain      String
-
-  @@map("roadmaps")
-}
-
-// ============================================
-// DAY 3 MODELS - NEW FEATURES
-// ============================================
-
-model Certification {
+model institutions {
   id            String    @id @default(uuid())
-  studentId     String    @map("student_id")
+  instituteName String
+  state         String
+  adminUserId   String
+  createdAt     DateTime
+  faculty       faculty[]
+  adminUser     users     @relation("InstitutionAdmin", fields: [adminUserId], references: [id])
+  profiles      profile[]
+}
+
+model profile {
+  id                     String                    @id @default(uuid())
+  userId                 String                    @unique
+  bio                    String?
+  gender                 String?
+  DOB                    DateTime?
+  avatarURL              String?
+  github                 String?
+  linkedin               String?
+  skills                 String[]
+  interests              String[]
+  department             String?
+  resourceId             String?
+  instituteId            String
+  facultyId              String?
+  certificates           certificates[]
+  credits                credits[]
+  internshipApplications internship_applications[]
+  mentorReviews          mentorReviews[]
+  mentorSessions         mentorSessions[]
+  portfolioProjects      portfolioProjects[]
+  faculty                faculty?                  @relation(fields: [facultyId], references: [id])
+  institution            institutions              @relation(fields: [instituteId], references: [id])
+  user                   users                     @relation(fields: [userId], references: [id])
+  learningProgress       studentLearningProgress[]
+}
+
+model roadmaps {
+  id          String        @id @default(uuid())
+  title       String
+  description String
+  domain      String
+  checkpoints checkpoints[]
+}
+
+model checkpoints {
+  id           String                    @id @default(uuid())
+  roadmapId    String
+  title        String
+  description  String
+  resourceType String
+  resourceUrl  String
+  roadmap      roadmaps                  @relation(fields: [roadmapId], references: [id])
+  progress     studentLearningProgress[]
+}
+
+model studentLearningProgress {
+  id           String      @id @default(uuid())
+  profileId    String
+  checkpointId String
+  isCompleted  Boolean
+  completedAt  DateTime?
+  checkpoint   checkpoints @relation(fields: [checkpointId], references: [id])
+  profile      profile     @relation(fields: [profileId], references: [id])
+}
+
+model courses {
+  id            String              @id @default(uuid())
   title         String
-  issuer        String?
-  issueDate     DateTime? @map("issue_date")
-  expiryDate    DateTime? @map("expiry_date")
-  credentialId  String?   @map("credential_id")
-  credentialUrl String?   @map("credential_url")
-  source        String    @default("manual") // manual, email, ai
-  documentUrl   String?   @map("document_url")
-  verified      Boolean   @default(false)
-  metadata      String?   // JSON stored as string
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("certifications")
+  description   String
+  type          CourseType
+  price         Float?
+  instructorId  String
+  thumbnail_url String?
+  created_at    DateTime
+  enrollments   courseEnrollments[]
+  instructor    users               @relation(fields: [instructorId], references: [id])
 }
 
-model Skill {
-  id        String   @id @default(uuid())
-  name      String   @unique
-  category  String?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  studentSkills StudentSkill[]
-
-  @@map("skills")
+model courseEnrollments {
+  id              String   @id @default(uuid())
+  courseId        String
+  userId          String
+  progressPercent Float?
+  enrolledAt      DateTime
+  course          courses  @relation(fields: [courseId], references: [id])
+  user            users    @relation(fields: [userId], references: [id])
 }
 
-model StudentSkill {
-  id               String   @id @default(uuid())
-  studentId        String   @map("student_id")
-  skillId          String   @map("skill_id")
-  proficiencyLevel Int      // 1-5
-  yearsExperience  Float?   @map("years_experience")
-  source           String   @default("manual") // manual, github, linkedin
-  createdAt        DateTime @default(now()) @map("created_at")
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  skill   Skill   @relation(fields: [skillId], references: [id], onDelete: Cascade)
-
-  @@unique([studentId, skillId])
-  @@map("student_skills")
+model mentors {
+  id        String           @id @default(uuid())
+  user_id   String           @unique
+  expertise Json?
+  rating    Float?
+  bio       String?
+  reviews   mentorReviews[]
+  sessions  mentorSessions[]
+  user      users            @relation(fields: [user_id], references: [id])
 }
 
-model CVGeneration {
-  id           String   @id @default(uuid())
-  studentId    String   @map("student_id")
-  templateName String   @map("template_name")
-  fileUrl      String   @map("file_url")
-  format       String   // html, pdf, docx
-  generatedAt  DateTime @default(now()) @map("generated_at")
-  metadata     String?  // JSON stored as string
-
-  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@map("cv_generations")
+model mentorSessions {
+  id           String              @id @default(uuid())
+  studentId    String
+  mentorId     String
+  scheduled_at DateTime
+  status       MentorSessionStatus
+  meeting_link String?
+  mentor       mentors             @relation(fields: [mentorId], references: [id])
+  student      profile             @relation(fields: [studentId], references: [id])
 }
 
-model Document {
-  id               String   @id @default(uuid())
-  userId           String   @map("user_id")
-  filename         String
-  originalFilename String   @map("original_filename")
-  fileUrl          String   @map("file_url")
-  fileType         String?  @map("file_type")
-  fileSize         BigInt?  @map("file_size")
-  category         String?  // resume, certificate, transcript, general
-  uploadedAt       DateTime @default(now()) @map("uploaded_at")
-  metadata         String?  // JSON stored as string
+model mentorReviews {
+  id        String  @id @default(uuid())
+  mentorId  String
+  rating    Float
+  reviews   String?
+  studentId String
+  mentor    mentors @relation(fields: [mentorId], references: [id])
+  student   profile @relation(fields: [studentId], references: [id])
+}
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+model portfolioProjects {
+  id          String   @id @default(uuid())
+  user_id     String
+  title       String
+  description String?
+  github_url  String?
+  live_url    String?
+  tags        String[]
+  user        profile  @relation(fields: [user_id], references: [id])
+}
 
-  @@map("documents")
+model internships {
+  id               String                    @id @default(uuid())
+  industry_user_id String
+  title            String
+  description      String
+  type             String
+  stipend          Float?
+  location         String
+  required_skills  Json
+  duration_weeks   Int
+  created_at       DateTime
+  applications     internship_applications[]
+  industryUser     users                     @relation(fields: [industry_user_id], references: [id])
+}
+
+model internship_applications {
+  id             String                  @id @default(uuid())
+  internship_id  String
+  student_id     String
+  status         InternshipStatus
+  submission_url String?
+  score          Float?
+  applied_at     DateTime
+  internship     internships             @relation(fields: [internship_id], references: [id])
+  student        profile                 @relation(fields: [student_id], references: [id])
+  evaluations    internship_evaluation[]
+  logbookEntries logbook_entries[]
+}
+
+model logbook_entries {
+  id            String                  @id @default(uuid())
+  applicationId String
+  date          DateTime
+  taskDone      String
+  proofUrl      String?
+  hours_spent   Int
+  application   internship_applications @relation(fields: [applicationId], references: [id])
+}
+
+model internship_evaluation {
+  id             String                  @id @default(uuid())
+  application_id String
+  faculty_id     String
+  rubric_json    Json?
+  comments       String?
+  final_score    Float?
+  application    internship_applications @relation(fields: [application_id], references: [id])
+  faculty        faculty                 @relation(fields: [faculty_id], references: [id])
+}
+
+model faculty {
+  id          String                  @id @default(uuid())
+  instituteId String
+  userId      String                  @unique
+  name        String
+  department  String
+  institution institutions            @relation(fields: [instituteId], references: [id])
+  user        users                   @relation(fields: [userId], references: [id])
+  evaluations internship_evaluation[]
+  students    profile[]
+}
+
+model credits {
+  id             String  @id @default(uuid())
+  student_id     String
+  credits_earned Float
+  student        profile @relation(fields: [student_id], references: [id])
+}
+
+model certificates {
+  id             String   @id @default(uuid())
+  student_id     String
+  title          String
+  certificateUrl String
+  issuedAt       DateTime
+  student        profile  @relation(fields: [student_id], references: [id])
+}
+
+model notifications {
+  id                String               @id @default(uuid())
+  title             String
+  message           String
+  created_at        DateTime
+  userNotifications user_notifications[]
+}
+
+model user_notifications {
+  id              String        @id @default(uuid())
+  user_id         String
+  notification_id String
+  isRead          Boolean
+  read_at         DateTime?
+  notification    notifications @relation(fields: [notification_id], references: [id])
+  user            users         @relation(fields: [user_id], references: [id])
+}
+
+enum CourseType {
+  PAID
+  FREE
+  GOVT
+}
+
+enum MentorSessionStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum InternshipStatus {
+  APPLIED
+  SHORTLISTED
+  SELECTED
+  REJECTED
 }
