@@ -62,7 +62,6 @@ router.post('/register', async (req, res) => {
     // Create user
     const user = await prisma.users.create({
       data: {
-        email,
         displayName,
         role: userRole,
         hashPassword: hash,
@@ -79,7 +78,10 @@ router.post('/register', async (req, res) => {
     
   } catch (error) {
     console.error('Registration error:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ 
+      message: 'Internal server error',
+      error: error.message 
+    });
   }
 });
 
