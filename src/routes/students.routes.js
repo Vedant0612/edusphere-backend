@@ -1,6 +1,8 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { ensureAuthenticated, restrictToRole } = require('../middleware/auth');
+const { upload } = require('../middleware/uploads');
+const { uploadOnCloudinary } = require('../services/cloudinary.service');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -24,8 +26,15 @@ const toStringArray = (value, fallback = []) => {
 };
 
 // CREATE STUDENT PROFILE (requires authentication)
-router.post('/', ensureAuthenticated, async (req, res) => {
+// Supports file upload for avatar - if file present, uploads to Cloudinary
+router.post('/', ensureAuthenticated, upload.any(), async (req, res) => {
   try {
+    // Debug: Log what we're receiving
+    console.log('=== REQUEST DEBUG ===');
+    console.log('req.body:', req.body);
+    console.log('req.files:', req.files);
+    console.log('==================');
+
     const {
       userId,
       instituteId,
@@ -45,6 +54,7 @@ router.post('/', ensureAuthenticated, async (req, res) => {
     if (!userId || !instituteId) {
       return res.status(400).json({
         error: 'userId and instituteId are required fields.',
+        received: { userId, instituteId, allKeys: Object.keys(req.body) }
       });
     }
 
@@ -71,6 +81,18 @@ router.post('/', ensureAuthenticated, async (req, res) => {
       return res.status(400).json({ error: 'Student profile already exists' });
     }
 
+    // Handle file upload if present (avatar)
+    let uploadedAvatarURL = avatarURL;
+    const file = req.files && req.files.length > 0 ? req.files[0] : req.file;
+    if (file) {
+      try {
+        uploadedAvatarURL = await uploadOnCloudinary(file.path);
+      } catch (uploadError) {
+        console.error('Avatar upload failed:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload avatar image' });
+      }
+    }
+
     const profile = await prisma.profile.create({
       data: {
         userId,
@@ -79,7 +101,7 @@ router.post('/', ensureAuthenticated, async (req, res) => {
         bio,
         gender,
         DOB: DOB ? new Date(DOB) : null,
-        avatarURL,
+        avatarURL: uploadedAvatarURL,
         github,
         linkedin,
         skills: toStringArray(skills),
@@ -158,7 +180,8 @@ router.get('/:id', async (req, res) => {
 
 // UPDATE STUDENT PROFILE (requires authentication)
 // UPDATE PROFILE DETAILS (PARTIAL - student-only)
-router.patch('/:id/profile', ensureAuthenticated, async (req, res) => {
+// Supports file upload for avatar - if file present, uploads to Cloudinary
+router.patch('/:id/profile', ensureAuthenticated, upload.any(), async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -176,6 +199,18 @@ router.patch('/:id/profile', ensureAuthenticated, async (req, res) => {
 
      if (String(req.user.id) !== String(existing.userId)) {
       return res.status(403).json({ error: 'Forbidden — you can only edit your own profile' });
+    }
+
+    // Handle file upload if present (avatar)
+    let uploadedAvatarURL;
+    const file = req.files && req.files.length > 0 ? req.files[0] : req.file;
+    if (file) {
+      try {
+        uploadedAvatarURL = await uploadOnCloudinary(file.path);
+      } catch (uploadError) {
+        console.error('Avatar upload failed:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload avatar image' });
+      }
     }
 
     // Extract possible updatable fields
@@ -200,7 +235,7 @@ router.patch('/:id/profile', ensureAuthenticated, async (req, res) => {
       bio: clean(bio),
       gender: clean(gender),
       DOB: DOB ? new Date(DOB) : undefined,
-      avatarURL: clean(avatarURL),
+      avatarURL: uploadedAvatarURL || clean(avatarURL), // Use uploaded URL if file provided
       github: clean(github),
       linkedin: clean(linkedin),
       skills: skills !== undefined ? toStringArray(skills) : undefined,
@@ -238,6 +273,218 @@ router.patch('/:id/profile', ensureAuthenticated, async (req, res) => {
       return res.status(404).json({ error: 'Student profile not found' });
     }
     return res.status(500).json({ error: 'Failed to update profile details' });
+  }
+});
+
+// GET STUDENT'S INTERNSHIP APPLICATIONS (student owner, admin from same institute, superAdmin)
+router.get('/:id/applications', ensureAuthenticated, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.query;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Get student profile
+    const student = await prisma.profile.findUnique({
+      where: { id },
+      select: {
+        userId: true,
+        instituteId: true
+      }
+    });
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // Check permissions
+    const isOwner = student.userId === userId;
+    const isSuperAdmin = userRole === 'superAdmin';
+    
+    let isInstituteAdmin = false;
+    if (userRole === 'admin') {
+      const adminInstitute = await prisma.institutions.findFirst({
+        where: { adminUserId: userId }
+      });
+      isInstituteAdmin = adminInstitute && adminInstitute.id === student.instituteId;
+    }
+
+    if (!isOwner && !isInstituteAdmin && !isSuperAdmin) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Build query
+    const where = { student_id: id };
+    if (status) where.status = status;
+
+    const applications = await prisma.internship_applications.findMany({
+      where,
+      include: {
+        internship: {
+          include: {
+            company: {
+              select: {
+                companyName: true,
+                location: true
+              }
+            }
+          }
+        },
+        logbookEntries: {
+          select: {
+            id: true,
+            date: true,
+            hours_spent: true,
+            verifiedByFaculty: true
+          }
+        },
+        evaluations: {
+          select: {
+            final_score: true,
+            comments: true
+          }
+        }
+      },
+      orderBy: { applied_at: 'desc' }
+    });
+
+    res.json({ applications, count: applications.length });
+  } catch (error) {
+    console.error('Get applications error:', error);
+    res.status(500).json({ error: 'Failed to fetch applications' });
+  }
+});
+
+// GET STUDENT'S MENTORS (student owner, admin, faculty, superAdmin)
+router.get('/:id/mentors', ensureAuthenticated, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    // Get student profile
+    const student = await prisma.profile.findUnique({
+      where: { id },
+      select: {
+        userId: true,
+        instituteId: true,
+        facultyId: true
+      }
+    });
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // Check permissions
+    const isOwner = student.userId === userId;
+    const isSuperAdmin = userRole === 'superAdmin';
+    
+    let hasAccess = isOwner || isSuperAdmin;
+    
+    if (userRole === 'admin') {
+      const adminInstitute = await prisma.institutions.findFirst({
+        where: { adminUserId: userId }
+      });
+      hasAccess = adminInstitute && adminInstitute.id === student.instituteId;
+    }
+
+    if (userRole === 'faculty') {
+      const faculty = await prisma.faculty.findUnique({
+        where: { userId }
+      });
+      hasAccess = faculty && faculty.id === student.facultyId;
+    }
+
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    // Get assigned faculty
+    const assignedFaculty = student.facultyId ? await prisma.faculty.findUnique({
+      where: { id: student.facultyId },
+      include: {
+        user: {
+          select: {
+            displayName: true,
+            email: true,
+            phone: true
+          }
+        }
+      }
+    }) : null;
+
+    // Get mentor sessions
+    const mentorSessions = await prisma.mentorSessions.findMany({
+      where: { studentId: id },
+      include: {
+        mentor: {
+          include: {
+            user: {
+              select: {
+                displayName: true,
+                email: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { scheduled_at: 'desc' }
+    });
+
+    res.json({
+      assignedFaculty,
+      mentorSessions,
+      sessionCount: mentorSessions.length
+    });
+  } catch (error) {
+    console.error('Get mentors error:', error);
+    res.status(500).json({ error: 'Failed to fetch mentors' });
+  }
+});
+
+// UPLOAD/UPDATE RESUME (student owner, superAdmin)
+router.post('/:id/resume', ensureAuthenticated, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resumeUrl } = req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    if (!resumeUrl) {
+      return res.status(400).json({ error: 'resumeUrl is required' });
+    }
+
+    // Get student profile
+    const student = await prisma.profile.findUnique({
+      where: { id },
+      select: { userId: true }
+    });
+
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+
+    // Check permissions
+    if (userRole !== 'superAdmin' && student.userId !== userId) {
+      return res.status(403).json({ error: 'Forbidden - Not your profile' });
+    }
+
+    // Update profile with resume URL (using resourceId field for now)
+    const updatedProfile = await prisma.profile.update({
+      where: { id },
+      data: {
+        resourceId: resumeUrl
+      }
+    });
+
+    res.json({ 
+      message: 'Resume uploaded successfully',
+      resumeUrl: updatedProfile.resourceId
+    });
+  } catch (error) {
+    console.error('Upload resume error:', error);
+    res.status(500).json({ error: 'Failed to upload resume' });
   }
 });
 

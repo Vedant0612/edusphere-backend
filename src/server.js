@@ -1,69 +1,67 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const { authenticationMiddleware } = require('./middleware/auth');
 
-// const userRouter = require('./routes/user');
-// const adminRouter = require('./routes/admin');
+const app = express();
+const PORT = process.env.PORT || 8000;
+
+// Middleware
+app.use(express.json());
+app.use(cors());
+app.use(authenticationMiddleware);
+
+// Import routes
 const authRouter = require('./routes/auth.routes');
+const usersRouter = require('./routes/users.routes');
 const studentsRouter = require('./routes/students.routes');
 const instituteRouter = require('./routes/institute.routes');
 const facultyRouter = require('./routes/faculty.routes');
-
-const app = express();
-
-const PORT = process.env.PORT || 8000;
-app.use(express.json());
-
-app.use(authenticationMiddleware);
-
-  
-
-
-
-
+const mentorRouter = require('./routes/mentor.routes');
+const companiesRouter = require('./routes/companies.routes');
+const jobsRouter = require('./routes/jobs.routes');
+const logbookRouter = require('./routes/logbook.routes');
+const roadmapsRouter = require('./routes/roadmaps.routes');
+const internshipsRouter = require('./routes/internships.routes');
+const internshipMgmtRouter = require('./routes/internship-management.routes');
+const testRouter = require('./routes/testMulter.route');
+// Home route
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Internship Platform API',
+    message: 'EduSphere Platform API',
     status: 'running',
+    version: '2.0',
     timestamp: new Date().toISOString(),
     endpoints: {
-      auth: '/api/auth',
-      users: '/api/users',
-      students: '/api/students',
-      internships: '/api/internships',
-      applications: '/api/applications',
-      roadmaps: '/roadmaps',                    
-      internshipManagement: '/internship-management',
-       mentor: '/mentor'
-    
+      auth: '/auth',
+      users: '/users',
+      students: '/students',
+      institutes: '/institutes',
+      faculty: '/faculty',
+      mentors: '/mentor',
+      companies: '/companies',
+      jobs: '/jobs',
+      logbook: '/logbook',
+      roadmaps: '/roadmaps',
+      internshipManagement: '/internship-management'
     }
   });
 });
 
-
-const userRoutes = require('./routes/users.routes');
-
-const internshipRoutes = require('./routes/internships.routes');
-const applicationRoutes = require('./routes/applications.routes');
-const roadmapsRouter = require('./routes/roadmaps.routes');
-const internshipMgmtRouter = require('./routes/internship-management.routes');
-const mentorRouter = require('./routes/mentor.routes');
-
-//to avoid merge conflicts i have imported ur stuff...
-
-//worked on these routes properly working 
-app.use('/auth', authRouter  );
-app.use('/students', studentsRouter );
+// Register routes
+app.use('/auth', authRouter);
+app.use('/users', usersRouter);
+app.use('/students', studentsRouter);
 app.use('/institutes', instituteRouter);
 app.use('/faculty', facultyRouter);
-
-//your routes i havent worked on this
-app.use('/internships', internshipRoutes);
-app.use('/users', userRoutes);
-app.use('/applications', applicationRoutes);
+app.use('/mentor', mentorRouter);
+app.use('/companies', companiesRouter);
+app.use('/jobs', jobsRouter);
+app.use('/logbook', logbookRouter);
 app.use('/roadmaps', roadmapsRouter);
 app.use('/internship-management', internshipMgmtRouter);
-app.use('/mentor', mentorRouter);
+app.use('/internships', internshipsRouter);
+app.use('/test', testRouter);
 
 
 app.use((err, req, res, next) => {

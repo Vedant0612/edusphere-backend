@@ -1,4 +1,6 @@
 // src/routes/applications.js
+// ⚠️ DEPRECATED: This file is superseded by jobs.routes.js
+// Consider migrating to the new routes or removing this file
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { ensureAuthenticated, restrictToRole } = require('../middleware/auth');

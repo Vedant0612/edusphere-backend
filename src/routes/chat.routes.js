@@ -1,6 +1,6 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { authenticateToken } = require('../middleware/auth');
+const { ensureAuthenticated } = require('../middleware/auth');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 // ============================================
 
 // CREATE CHAT ROOM
-router.post('/rooms', authenticateToken, async (req, res) => {
+router.post('/rooms', ensureAuthenticated, async (req, res) => {
   try {
     const { name, type, internshipId, participantIds } = req.body;
     const userId = req.user.userId;

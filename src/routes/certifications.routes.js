@@ -1,41 +1,45 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { authenticateToken } = require('../middleware/auth');
-const { upload } = require('../middleware/upload');
+const { ensureAuthenticated } = require('../middleware/auth');
+const { upload } = require('../middleware/uploads');
+const { uploadOnCloudinary } = require('../services/cloudinary.service');
 const pdfService = require('../services/pdf.service');
 const aiService = require('../services/ai.service');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// Upload and scan certificate
-router.post('/upload', authenticateToken, upload.single('certificate'), async (req, res) => {
-  const userId = req.user.userId;
-  const file = req.file;
+
+// Upload certificate with file - file is required
+router.post('/upload', ensureAuthenticated, upload.any(), async (req, res) => {
+  const userId = req.user.id;
+  
+  // Accept any field name
+  const file = req.files && req.files.length > 0 ? req.files[0] : req.file;
 
   if (!file) {
-    return res.status(400).json({ error: 'No file uploaded' });
+    return res.status(400).json({ error: 'No file uploaded. Please include a certificate file.' });
   }
 
   try {
     // Get student profile
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { student: true }
+    const profile = await prisma.profile.findUnique({
+      where: { userId },
+      select: { id: true }
     });
 
-    if (!user.student) {
+    if (!profile) {
       return res.status(400).json({ error: 'Student profile not found' });
     }
+
+    // Upload to Cloudinary
+    const certificateUrl = await uploadOnCloudinary(file.path);
 
     let certData = {
       title: req.body.title || 'Untitled Certificate',
       issuer: req.body.issuer || null,
-      issueDate: req.body.issueDate ? new Date(req.body.issueDate) : null,
-      credentialId: req.body.credentialId || null,
-      credentialUrl: req.body.credentialUrl || null,
-      source: 'manual',
-      documentUrl: `/uploads/certificates/${file.filename}`
+      issuedAt: req.body.issueDate ? new Date(req.body.issueDate) : new Date(),
+      certificateUrl
     };
 
     // If PDF, try to extract information using AI
@@ -49,9 +53,7 @@ router.post('/upload', authenticateToken, upload.single('certificate'), async (r
             ...certData,
             title: extracted.title || certData.title,
             issuer: extracted.issuer || certData.issuer,
-            issueDate: extracted.issueDate ? new Date(extracted.issueDate) : certData.issueDate,
-            credentialId: extracted.credentialId || certData.credentialId,
-            source: 'ai'
+            issuedAt: extracted.issueDate ? new Date(extracted.issueDate) : certData.issuedAt
           };
         }
       } catch (error) {
@@ -59,9 +61,9 @@ router.post('/upload', authenticateToken, upload.single('certificate'), async (r
       }
     }
 
-    const certification = await prisma.certification.create({
+    const certificate = await prisma.certificates.create({
       data: {
-        studentId: user.student.id,
+        student_id: profile.id,
         ...certData
       }
     });
@@ -69,7 +71,8 @@ router.post('/upload', authenticateToken, upload.single('certificate'), async (r
     res.json({
       success: true,
       message: 'Certificate uploaded successfully',
-      certification
+      certificate,
+      certificateUrl
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -77,90 +80,94 @@ router.post('/upload', authenticateToken, upload.single('certificate'), async (r
 });
 
 // Get all certifications
-router.get('/', authenticateToken, async (req, res) => {
-  const userId = req.user.userId;
+router.get('/', ensureAuthenticated, async (req, res) => {
+  const userId = req.user.id;
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { student: true }
+    const profile = await prisma.profile.findUnique({
+      where: { userId },
+      select: { id: true }
     });
 
-    if (!user.student) {
+    if (!profile) {
       return res.status(404).json({ error: 'Student profile not found' });
     }
 
-    const certifications = await prisma.certification.findMany({
-      where: { studentId: user.student.id },
-      orderBy: { issueDate: 'desc' }
+    const certificates = await prisma.certificates.findMany({
+      where: { student_id: profile.id },
+      orderBy: { issuedAt: 'desc' }
     });
 
-    res.json({ certifications });
+    res.json({ certificates });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // Update certification
-router.put('/:id', authenticateToken, async (req, res) => {
+router.put('/:id', ensureAuthenticated, async (req, res) => {
   const { id } = req.params;
-  const userId = req.user.userId;
+  const userId = req.user.id;
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { student: true }
+    const profile = await prisma.profile.findUnique({
+      where: { userId },
+      select: { id: true }
     });
 
-    const certification = await prisma.certification.findFirst({
+    const certificate = await prisma.certificates.findFirst({
       where: {
         id: id,
-        studentId: user.student.id
+        student_id: profile.id
       }
     });
 
-    if (!certification) {
-      return res.status(404).json({ error: 'Certification not found' });
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
     }
 
-    const updated = await prisma.certification.update({
+    const updated = await prisma.certificates.update({
       where: { id: id },
-      data: req.body
+      data: {
+        title: req.body.title,
+        issuer: req.body.issuer,
+        issuedAt: req.body.issuedAt ? new Date(req.body.issuedAt) : undefined
+      }
     });
 
-    res.json({ success: true, certification: updated });
+    res.json({ success: true, certificate: updated });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // Delete certification
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', ensureAuthenticated, async (req, res) => {
   const { id } = req.params;
-  const userId = req.user.userId;
+  const userId = req.user.id;
 
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { student: true }
+    const profile = await prisma.profile.findUnique({
+      where: { userId },
+      select: { id: true }
     });
 
-    const certification = await prisma.certification.findFirst({
+    const certificate = await prisma.certificates.findFirst({
       where: {
         id: id,
-        studentId: user.student.id
+        student_id: profile.id
       }
     });
 
-    if (!certification) {
-      return res.status(404).json({ error: 'Certification not found' });
+    if (!certificate) {
+      return res.status(404).json({ error: 'Certificate not found' });
     }
 
-    await prisma.certification.delete({
+    await prisma.certificates.delete({
       where: { id: id }
     });
 
-    res.json({ success: true, message: 'Certification deleted' });
+    res.json({ success: true, message: 'Certificate deleted' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -10,7 +10,7 @@ datasource db {
 model users {
   id                       String               @id @default(uuid())
   displayName              String
-  role                     String[]
+  role                     String               // Changed from String[] to String (single role)
   email                    String               @unique
   salt                     String
   phone                    String
@@ -23,6 +23,7 @@ model users {
   mentors                  mentors?
   profiles                 profile?
   user_notifications       user_notifications[]
+  company                  companies?
 }
 
 model institutions {
@@ -161,6 +162,7 @@ model portfolioProjects {
 model internships {
   id               String                    @id @default(uuid())
   industry_user_id String
+  company_id       String?
   title            String
   description      String
   type             String
@@ -169,8 +171,10 @@ model internships {
   required_skills  Json
   duration_weeks   Int
   created_at       DateTime
+  isActive         Boolean                   @default(true)
   applications     internship_applications[]
   industryUser     users                     @relation(fields: [industry_user_id], references: [id])
+  company          companies?                @relation("CompanyPostings", fields: [company_id], references: [id])
 }
 
 model internship_applications {
@@ -188,13 +192,16 @@ model internship_applications {
 }
 
 model logbook_entries {
-  id            String                  @id @default(uuid())
-  applicationId String
-  date          DateTime
-  taskDone      String
-  proofUrl      String?
-  hours_spent   Int
-  application   internship_applications @relation(fields: [applicationId], references: [id])
+  id                 String                  @id @default(uuid())
+  applicationId      String
+  date               DateTime
+  taskDone           String
+  proofUrl           String?
+  hours_spent        Int
+  verifiedByFaculty  Boolean                 @default(false)
+  facultyComment     String?
+  verifiedAt         DateTime?
+  application        internship_applications @relation(fields: [applicationId], references: [id])
 }
 
 model internship_evaluation {
@@ -264,6 +271,20 @@ enum MentorSessionStatus {
   PENDING
   COMPLETED
   CANCELLED
+}
+
+model companies {
+  id           String        @id @default(uuid())
+  userId       String        @unique
+  companyName  String
+  industry     String?
+  website      String?
+  description  String?
+  location     String?
+  logoUrl      String?
+  createdAt    DateTime      @default(now())
+  user         users         @relation(fields: [userId], references: [id])
+  jobPostings  internships[] @relation("CompanyPostings")
 }
 
 enum InternshipStatus {

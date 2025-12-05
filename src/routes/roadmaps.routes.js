@@ -10,7 +10,7 @@ const prisma = new PrismaClient();
 // ============================================
 
 // CREATE ROADMAP (Faculty/Admin only)
-router.post('/', ensureAuthenticated, restrictToRole('faculty'), async (req, res) => {
+router.post('/', ensureAuthenticated, restrictToRole('faculty','mentor'), async (req, res) => {
   try {
     const { title, description, domain } = req.body;
 
@@ -203,7 +203,7 @@ router.get('/:id', ensureAuthenticated, async (req, res) => {
 // ============================================
 
 // ADD CHECKPOINT TO ROADMAP (faculty/admin only)
-router.post('/:roadmapId/checkpoints', ensureAuthenticated, restrictToRole('faculty'), async (req, res) => {
+router.post('/:roadmapId/checkpoints', ensureAuthenticated, restrictToRole('faculty','mentor'), async (req, res) => {
   try {
     const { roadmapId } = req.params;
     const { title, description, resourceType, resourceUrl } = req.body;
