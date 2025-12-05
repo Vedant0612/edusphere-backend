@@ -14,7 +14,6 @@ app.use(authenticationMiddleware);
 // Import routes
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const cors = require('cors');
 
 const setupChatSocket = require('./socket/chat.socket');
 
@@ -34,6 +33,7 @@ const internshipMgmtRouter = require('./routes/internship-management.routes');
 const testRouter = require('./routes/testMulter.route');
 const chatRouter = require('./routes/chat.routes');
 const notificationsRouter = require('./routes/notifications.routes');
+const applicationRoutes = require('./routes/applications.routes');
 // Home route
 app.get('/', (req, res) => {
   res.json({ 
