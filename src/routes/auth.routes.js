@@ -67,6 +67,7 @@ router.post('/register', async (req, res) => {
         hashPassword: hash,
         salt,
         phone: phone || '',
+        email
       },
     });
 

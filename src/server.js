@@ -34,28 +34,7 @@ const testRouter = require('./routes/testMulter.route');
 const chatRouter = require('./routes/chat.routes');
 const notificationsRouter = require('./routes/notifications.routes');
 const applicationRoutes = require('./routes/applications.routes');
-// Home route
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'EduSphere Platform API',
-    status: 'running',
-    version: '2.0',
-    timestamp: new Date().toISOString(),
-    endpoints: {
-      auth: '/auth',
-      users: '/users',
-      students: '/students',
-      institutes: '/institutes',
-      faculty: '/faculty',
-      mentors: '/mentor',
-      companies: '/companies',
-      jobs: '/jobs',
-      logbook: '/logbook',
-      roadmaps: '/roadmaps',
-      internshipManagement: '/internship-management'
-    }
-  });
-});
+const certificationsRouter = require('./routes/certifications.routes');
 
 // Register routes
 app.use('/auth', authRouter);
@@ -74,6 +53,7 @@ app.use('/test', testRouter);
 app.use('/chat', chatRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/applications', applicationRoutes);
+app.use('/certifications', certificationsRouter);
 
 
 // ============================================
@@ -94,26 +74,40 @@ setupChatSocket(io);
 app.set('io', io);
 
 // ============================================
-// MIDDLEWARE
+// HOME ROUTE
 // ============================================
 app.get('/', (req, res) => {
   res.json({ 
-    message: 'Internship Platform API with WebSocket',
+    message: 'EduSphere Platform API with WebSocket',
     status: 'running',
+    version: '2.0',
     timestamp: new Date().toISOString(),
     endpoints: {
       auth: '/auth',
+      users: '/users',
       students: '/students',
-      internships: '/internships',
-      applications: '/applications',
-      roadmaps: '/roadmaps',
-      internshipManagement: '/internship-management',
+      institutes: '/institutes',
+      faculty: '/faculty',
       mentor: '/mentor',
-      chat: '/chat'
+      companies: '/companies',
+      jobs: '/jobs',
+      logbook: '/logbook',
+      roadmaps: '/roadmaps',
+      internships: '/internships',
+      internshipManagement: '/internship-management',
+      applications: '/applications',
+      certifications: '/certifications',
+      chat: '/chat',
+      notifications: '/notifications',
+      test: '/test'
     },
-    websocket: `ws://localhost:${process.env.PORT || 8000}`
+    websocket: `ws://localhost:${PORT}`
   });
 });
+
+// ============================================
+// ERROR HANDLING MIDDLEWARE
+// ============================================
 
 
 

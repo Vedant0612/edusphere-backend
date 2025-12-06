@@ -233,7 +233,7 @@ router.post('/:roadmapId/checkpoints', ensureAuthenticated, restrictToRole('facu
 });
 
 // UPDATE CHECKPOINT (faculty/admin only)
-router.put('/checkpoints/:id', ensureAuthenticated, restrictToRole('faculty'), async (req, res) => {
+router.put('/checkpoints/:id', ensureAuthenticated, restrictToRole('faculty','mentor'), async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = req.body;
@@ -274,6 +274,7 @@ router.delete('/checkpoints/:id', ensureAuthenticated, restrictToRole('faculty')
 // ============================================
 
 // MARK CHECKPOINT AS COMPLETE/INCOMPLETE
+
 router.post('/checkpoints/:checkpointId/progress', ensureAuthenticated, async (req, res) => {
   try {
     const { checkpointId } = req.params;
