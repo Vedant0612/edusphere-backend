@@ -3,6 +3,7 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const { ensureAuthenticated, restrictToRole } = require('../middleware/auth');
 const notificationService = require('../services/notification.service');
+const { log } = require('console');
 
 const prisma = new PrismaClient();
 
@@ -16,8 +17,8 @@ router.post('/:internshipId/apply', ensureAuthenticated, async (req, res) => {
     const { internshipId } = req.params;
     const { coverLetter, resumeUrl } = req.body;
     const userId = req.user.id;
-
-    // Get student profile
+    
+    // Get student profile 
     const profile = await prisma.profile.findUnique({
       where: { userId }
     });
@@ -127,11 +128,134 @@ router.get('/my-applications', ensureAuthenticated, async (req, res) => {
   }
 });
 
-// UPDATE APPLICATION STATUS (Admin/Industry only)
+// GET APPLICATIONS FOR COMPANY'S INTERNSHIPS (Company view)
+router.get('/company/applications', ensureAuthenticated, restrictToRole('company'), async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { status, internshipId } = req.query;
+
+    // Get company profile
+    const company = await prisma.companies.findUnique({
+      where: { userId }
+    });
+
+    if (!company) {
+      return res.status(404).json({ error: 'Company profile not found' });
+    }
+
+    // Get all internships posted by this company
+    const internships = await prisma.internships.findMany({
+      where: { 
+        company_id: company.id,
+        ...(internshipId && { id: internshipId })
+      },
+      include: {
+        applications: {
+          where: {
+            ...(status && { status })
+          },
+          include: {
+            student: {
+              include: {
+                user: {
+                  select: {
+                    displayName: true,
+                    email: true,
+                    phone: true
+                  }
+                }
+              }
+            }
+          },
+          orderBy: { applied_at: 'desc' }
+        }
+      }
+    });
+
+    // Flatten applications with internship details
+    const applications = [];
+    internships.forEach(internship => {
+      internship.applications.forEach(app => {
+        applications.push({
+          ...app,
+          internship: {
+            id: internship.id,
+            title: internship.title,
+            location: internship.location,
+            duration: internship.duration
+          }
+        });
+      });
+    });
+
+    res.json({ 
+      applications,
+      total: applications.length 
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch applications' });
+  }
+});
+
+// GET SINGLE APPLICATION DETAILS (Company view)
+router.get('/company/applications/:id', ensureAuthenticated, restrictToRole('company'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const company = await prisma.companies.findUnique({
+      where: { userId }
+    });
+
+    if (!company) {
+      return res.status(404).json({ error: 'Company profile not found' });
+    }
+
+    const application = await prisma.internship_applications.findUnique({
+      where: { id },
+      include: {
+        student: {
+          include: {
+            user: {
+              select: {
+                displayName: true,
+                email: true,
+                phone: true
+              }
+            }
+          }
+        },
+        internship: true,
+        logbookEntries: {
+          orderBy: { date: 'desc' }
+        }
+      }
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Verify this application is for this company's internship
+    if (application.internship.company_id !== company.id) {
+      return res.status(403).json({ error: 'Unauthorized access to this application' });
+    }
+
+    res.json({ application });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch application' });
+  }
+});
+
+// UPDATE APPLICATION STATUS (Company/Admin only)
 router.patch('/applications/:id/status', ensureAuthenticated, async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
+    const userId = req.user.id;
+    const userRole = req.user.role;
 
     const validStatuses = ['APPLIED', 'SHORTLISTED', 'SELECTED', 'REJECTED'];
     
@@ -139,7 +263,32 @@ router.patch('/applications/:id/status', ensureAuthenticated, async (req, res) =
       return res.status(400).json({ error: 'Invalid status' });
     }
 
-    const application = await prisma.internship_applications.update({
+    // Get the application with internship details
+    const application = await prisma.internship_applications.findUnique({
+      where: { id },
+      include: {
+        internship: true
+      }
+    });
+
+    if (!application) {
+      return res.status(404).json({ error: 'Application not found' });
+    }
+
+    // Authorization check: only company that posted the internship or admin can update
+    if (userRole === 'company') {
+      const company = await prisma.companies.findUnique({
+        where: { userId }
+      });
+
+      if (!company || application.internship.company_id !== company.id) {
+        return res.status(403).json({ error: 'Unauthorized to update this application' });
+      }
+    } else if (!['admin', 'superAdmin'].includes(userRole)) {
+      return res.status(403).json({ error: 'Unauthorized' });
+    }
+
+    const updatedApplication = await prisma.internship_applications.update({
       where: { id },
       data: { status }
     });
@@ -154,7 +303,7 @@ router.patch('/applications/:id/status', ensureAuthenticated, async (req, res) =
 
     res.json({
       message: `Application status updated to ${status}`,
-      application
+      application: updatedApplication
     });
   } catch (error) {
     console.error(error);
