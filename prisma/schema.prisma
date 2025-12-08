@@ -15,6 +15,9 @@ model users {
   salt                     String
   phone                    String
   hashPassword             String
+  graduationYear           Int?                 // For students
+  createdAt                DateTime             @default(now())
+  updatedAt                DateTime             @default(now()) @updatedAt
   courseEnrollments        courseEnrollments[]
   courses_instructor       courses[]
   facultyProfile           faculty?
@@ -39,9 +42,13 @@ model users {
 model institutions {
   id            String    @id @default(uuid())
   instituteName String
-  state         String
+  domain        String?   // Email domain (e.g., "iit.ac.in")
+  state         String?
+  city          String?
+  address       String?
   adminUserId   String
-  createdAt     DateTime
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
   faculty       faculty[]
   adminUser     users     @relation("InstitutionAdmin", fields: [adminUserId], references: [id])
   profiles      profile[]
@@ -62,6 +69,9 @@ model profile {
   resourceId             String?
   instituteId            String
   facultyId              String?
+  graduationYear         Int?                      // Student graduation year
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @default(now()) @updatedAt
   certificates           certificates[]
   credits                credits[]
   internshipApplications internship_applications[]
@@ -127,14 +137,17 @@ model courseEnrollments {
 }
 
 model mentors {
-  id        String           @id @default(uuid())
-  user_id   String           @unique
-  expertise Json?
-  rating    Float?
-  bio       String?
-  reviews   mentorReviews[]
-  sessions  mentorSessions[]
-  user      users            @relation(fields: [user_id], references: [id])
+  id           String           @id @default(uuid())
+  user_id      String           @unique
+  expertise    String?          // Area of expertise from signup
+  experience   String?          // Years of experience
+  rating       Float?
+  bio          String?
+  availability Json?            // Weekly availability schedule
+  createdAt    DateTime         @default(now())
+  reviews      mentorReviews[]
+  sessions     mentorSessions[]
+  user         users            @relation(fields: [user_id], references: [id])
 }
 
 model mentorSessions {
@@ -143,7 +156,9 @@ model mentorSessions {
   mentorId     String
   scheduled_at DateTime
   status       MentorSessionStatus
+  topic        String?
   meeting_link String?
+  createdAt    DateTime            @default(now())
   mentor       mentors             @relation(fields: [mentorId], references: [id])
   student      profile             @relation(fields: [studentId], references: [id])
 }
@@ -231,6 +246,10 @@ model faculty {
   userId      String                  @unique
   name        String
   department  String
+  phoneCode   String?                 // Phone country code
+  phoneNumber String?                 // Phone number
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @default(now()) @updatedAt
   institution institutions            @relation(fields: [instituteId], references: [id])
   user        users                   @relation(fields: [userId], references: [id])
   evaluations internship_evaluation[]
@@ -370,23 +389,26 @@ enum CourseType {
 }
 
 enum MentorSessionStatus {
-  PENDING
-  COMPLETED
-  CANCELLED
+  scheduled
+  completed
+  cancelled
 }
 
 model companies {
-  id           String        @id @default(uuid())
-  userId       String        @unique
-  companyName  String
-  industry     String?
-  website      String?
-  description  String?
-  location     String?
-  logoUrl      String?
-  createdAt    DateTime      @default(now())
-  user         users         @relation(fields: [userId], references: [id])
-  jobPostings  internships[] @relation("CompanyPostings")
+  id            String        @id @default(uuid())
+  userId        String        @unique
+  companyName   String
+  website       String?
+  officialEmail String?       // Company official email
+  contactName   String?       // HR/Contact person name
+  industry      String?
+  description   String?
+  location      String?
+  logoUrl       String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @default(now()) @updatedAt
+  user          users         @relation(fields: [userId], references: [id])
+  jobPostings   internships[] @relation("CompanyPostings")
 }
 
 enum InternshipStatus {

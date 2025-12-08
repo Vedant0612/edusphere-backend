@@ -92,7 +92,9 @@ router.get('/', async (req, res) => {
             select: {
                 id: true,
                 instituteName: true,
+                domain: true,
                 state: true,
+                city: true,
                 createdAt: true,
                 _count: {
                     select: {
@@ -104,7 +106,7 @@ router.get('/', async (req, res) => {
             orderBy: { instituteName: 'asc' }
         });
         
-        res.json({ institutes, count: institutes.length });
+        res.json(institutes);
     } catch (error) {
         console.error('Get institutes error:', error);
         res.status(500).json({ message: 'Internal server error' });

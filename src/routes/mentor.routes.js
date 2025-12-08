@@ -6,103 +6,182 @@ const router = express.Router();
 const prisma = new PrismaClient();
 
 // ============================================
-// MENTOR MANAGEMENT
+// MENTOR PROFILE & AUTH
 // ============================================
 
-// REGISTER AS MENTOR
-router.post('/register', authenticationMiddleware, async (req, res) => {
+/**
+ * GET /api/mentor/me/profile
+ * Get logged-in mentor's profile
+ */
+router.get('/me/profile', authenticationMiddleware, async (req, res) => {
   try {
-    const { expertise, bio } = req.body;
-    const userId = req.user.userId;
+    const userId = req.user.id;
 
-    // Check if already a mentor
-    const existingMentor = await prisma.mentors.findUnique({
-      where: { user_id: userId }
-    });
-
-    if (existingMentor) {
-      return res.status(400).json({ error: 'Already registered as mentor' });
-    }
-
-    const mentor = await prisma.mentors.create({
-      data: {
-        user_id: userId,
-        expertise: expertise,
-        bio: bio,
-        rating: 0
-      },
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
       include: {
         user: {
-          select: { id: true, displayName: true, email: true }
+          select: { 
+            id: true,
+            displayName: true,
+            email: true,
+            phone: true
+          }
         }
       }
     });
 
-    res.status(201).json({
-      message: 'Mentor registration successful',
-      mentor
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor profile not found' 
+      });
+    }
+
+    res.json({ 
+      success: true,
+      mentor: {
+        id: mentor.id,
+        userId: mentor.user_id,
+        name: mentor.user.displayName,
+        email: mentor.user.email,
+        phone: mentor.user.phone,
+        expertise: mentor.expertise,
+        experience: mentor.experience,
+        bio: mentor.bio,
+        rating: mentor.rating
+      }
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to register as mentor' });
+    console.error('Error fetching mentor profile:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch mentor profile' 
+    });
   }
 });
 
-// GET ALL MENTORS
-router.get('/', async (req, res) => {
+/**
+ * PUT /api/mentor/me/profile
+ * Update mentor profile
+ */
+router.put('/me/profile', authenticationMiddleware, async (req, res) => {
   try {
-    const { expertise } = req.query;
+    const userId = req.user.id;
+    const { expertise, bio, experience } = req.body;
 
-    const mentors = await prisma.mentors.findMany({
-      where: expertise ? { 
-        expertise: {
-          path: [],
-          string_contains: expertise
-        }
-      } : undefined,
-      include: {
-        user: {
-          select: { id: true, displayName: true, email: true }
-        },
-        _count: {
-          select: { sessions: true, reviews: true }
-        }
-      },
-      orderBy: { rating: 'desc' }
-    });
-
-    res.json({ mentors });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch mentors' });
-  }
-});
-
-// UPDATE MENTOR PROFILE
-router.put('/:id', authenticationMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { expertise, bio } = req.body;
-    const userId = req.user.userId;
-
-    // Verify ownership
     const mentor = await prisma.mentors.findUnique({
-      where: { id }
+      where: { user_id: userId }
     });
 
-    if (!mentor || mentor.user_id !== userId) {
-      return res.status(403).json({ error: 'Unauthorized' });
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor profile not found' 
+      });
     }
 
     const updated = await prisma.mentors.update({
-      where: { id },
-      data: { expertise, bio }
+      where: { id: mentor.id },
+      data: { 
+        expertise: expertise !== undefined ? expertise : mentor.expertise,
+        experience: experience !== undefined ? experience : mentor.experience,
+        bio: bio !== undefined ? bio : mentor.bio
+      },
+      include: {
+        user: {
+          select: { displayName: true, email: true, phone: true }
+        }
+      }
     });
 
-    res.json({ message: 'Mentor profile updated', mentor: updated });
+    res.json({ 
+      success: true,
+      message: 'Profile updated successfully',
+      mentor: updated 
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to update profile' });
+    console.error('Error updating mentor profile:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to update profile' 
+    });
+  }
+});
+
+// ============================================
+// DASHBOARD & STATISTICS
+// ============================================
+
+/**
+ * GET /api/mentor/me/stats
+ * Get mentor dashboard statistics
+ */
+router.get('/me/stats', authenticationMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
+    });
+
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
+    }
+
+    // Get session counts
+    const [totalSessions, upcomingSessions, completedSessions] = await Promise.all([
+      prisma.mentorSessions.count({
+        where: { mentorId: mentor.id }
+      }),
+      prisma.mentorSessions.count({
+        where: { 
+          mentorId: mentor.id,
+          status: 'scheduled'
+        }
+      }),
+      prisma.mentorSessions.count({
+        where: { 
+          mentorId: mentor.id,
+          status: 'completed'
+        }
+      })
+    ]);
+
+    // Get unique students count
+    const uniqueStudents = await prisma.mentorSessions.groupBy({
+      by: ['studentId'],
+      where: { mentorId: mentor.id }
+    });
+
+    // Get average rating
+    const reviews = await prisma.mentorReviews.findMany({
+      where: { mentorId: mentor.id },
+      select: { rating: true }
+    });
+
+    const avgRating = reviews.length > 0
+      ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length
+      : 0;
+
+    res.json({
+      success: true,
+      totalSessions,
+      upcomingSessions,
+      completedSessions,
+      totalStudents: uniqueStudents.length,
+      avgRating: parseFloat(avgRating.toFixed(1))
+    });
+  } catch (error) {
+    console.error('Error fetching mentor stats:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch statistics' 
+    });
   }
 });
 
@@ -110,78 +189,41 @@ router.put('/:id', authenticationMiddleware, async (req, res) => {
 // MENTOR SESSIONS
 // ============================================
 
-// BOOK MENTOR SESSION
-router.post('/sessions', authenticationMiddleware, async (req, res) => {
+/**
+ * GET /api/mentor/me/sessions
+ * Get all sessions for logged-in mentor
+ */
+router.get('/me/sessions', authenticationMiddleware, async (req, res) => {
   try {
-    const { mentorId, scheduledAt, meetingLink } = req.body;
-    const userId = req.user.userId;
+    const userId = req.user.id;
+    const { status } = req.query;
 
-    // Get student profile
-    const userProfile = await prisma.profile.findUnique({
-      where: { userId: userId },
-      include: {
-        user: {
-          select: { displayName: true, email: true }
-        }
-      }
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
     });
 
-    if (!userProfile) {
-      return res.status(400).json({ error: 'Student profile required' });
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
     }
 
-    const session = await prisma.mentorSessions.create({
-      data: {
-        studentId: userProfile.id,
-        mentorId: mentorId,
-        scheduled_at: new Date(scheduledAt),
-        meeting_link: meetingLink,
-        status: 'PENDING'
+    const sessions = await prisma.mentorSessions.findMany({
+      where: { 
+        mentorId: mentor.id,
+        ...(status ? { status } : {})
       },
       include: {
         student: {
           include: {
-            user: { select: { displayName: true, email: true } }
-          }
-        },
-        mentor: {
-          include: {
-            user: { select: { displayName: true, email: true } }
-          }
-        }
-      }
-    });
-
-    res.status(201).json({
-      message: 'Session booked successfully',
-      session
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to book session' });
-  }
-});
-
-// GET MY SESSIONS (Student)
-router.get('/sessions/my', authenticationMiddleware, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    const userProfile = await prisma.profile.findUnique({
-      where: { userId: userId }
-    });
-
-    if (!userProfile) {
-      return res.status(404).json({ error: 'Student profile not found' });
-    }
-
-    const sessions = await prisma.mentorSessions.findMany({
-      where: { studentId: userProfile.id },
-      include: {
-        mentor: {
-          include: {
             user: {
-              select: { displayName: true, email: true }
+              select: { 
+                id: true,
+                displayName: true,
+                email: true
+              }
             }
           }
         }
@@ -189,270 +231,461 @@ router.get('/sessions/my', authenticationMiddleware, async (req, res) => {
       orderBy: { scheduled_at: 'desc' }
     });
 
-    res.json({ sessions });
+    const formattedSessions = sessions.map(session => ({
+      id: session.id,
+      student: {
+        id: session.student?.id,
+        name: session.student?.user?.displayName || 'Unknown Student',
+        email: session.student?.user?.email
+      },
+      scheduled_at: session.scheduled_at,
+      topic: session.topic || 'General Mentoring',
+      status: session.status,
+      meeting_link: session.meeting_link,
+      notes: session.notes,
+      createdAt: session.createdAt
+    }));
+
+    res.json({ 
+      success: true,
+      sessions: formattedSessions 
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch sessions' });
+    console.error('Error fetching mentor sessions:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch sessions' 
+    });
   }
 });
 
-// UPDATE SESSION STATUS
-router.patch('/sessions/:id/status', authenticationMiddleware, async (req, res) => {
+/**
+ * GET /api/mentor/me/sessions/:id
+ * Get specific session details
+ */
+router.get('/me/sessions/:id', authenticationMiddleware, async (req, res) => {
   try {
+    const userId = req.user.id;
     const { id } = req.params;
-    const { status } = req.body;
-    const userId = req.user.userId;
 
-    const validStatuses = ['PENDING', 'COMPLETED', 'CANCELLED'];
-    if (!validStatuses.includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
-    }
-
-    // Verify the session belongs to user (as mentor or student)
-    const session = await prisma.mentorSessions.findUnique({
-      where: { id },
-      include: {
-        student: true,
-        mentor: true
-      }
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
     });
 
-    if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
     }
 
-    const isMentor = session.mentor.user_id === userId;
-    const isStudent = session.student.userId === userId;
-
-    if (!isMentor && !isStudent) {
-      return res.status(403).json({ error: 'Unauthorized' });
-    }
-
-    const updated = await prisma.mentorSessions.update({
-      where: { id },
-      data: { status }
-    });
-
-    res.json({ message: 'Session updated', session: updated });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to update session' });
-  }
-});
-
-// ============================================
-// MENTOR REVIEWS
-// ============================================
-
-// ADD REVIEW FOR MENTOR
-router.post('/reviews', authenticationMiddleware, async (req, res) => {
-  try {
-    const { mentorId, rating, review } = req.body;
-    const userId = req.user.userId;
-
-    if (rating < 1 || rating > 5) {
-      return res.status(400).json({ error: 'Rating must be between 1 and 5' });
-    }
-
-    // Get student profile
-    const userProfile = await prisma.profile.findUnique({
-      where: { userId: userId }
-    });
-
-    if (!userProfile) {
-      return res.status(400).json({ error: 'Student profile required' });
-    }
-
-    // Create review
-    const mentorReview = await prisma.mentorReviews.create({
-      data: {
-        mentorId: mentorId,
-        studentId: userProfile.id,
-        rating: rating,
-        reviews: review
+    const session = await prisma.mentorSessions.findFirst({
+      where: { 
+        id,
+        mentorId: mentor.id 
       },
       include: {
         student: {
           include: {
-            user: { select: { displayName: true } }
+            user: {
+              select: { 
+                displayName: true,
+                email: true
+              }
+            }
           }
         }
       }
     });
 
-    // Update mentor average rating
-    const allReviews = await prisma.mentorReviews.findMany({
-      where: { mentorId }
-    });
+    if (!session) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Session not found' 
+      });
+    }
 
-    const avgRating = allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length;
-
-    await prisma.mentors.update({
-      where: { id: mentorId },
-      data: { rating: avgRating }
-    });
-
-    res.status(201).json({
-      message: 'Review submitted successfully',
-      review: mentorReview
+    res.json({ 
+      success: true,
+      session 
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to submit review' });
+    console.error('Error fetching session:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch session' 
+    });
+  }
+});
+
+/**
+ * PUT /api/mentor/me/sessions/:id
+ * Update session (status, notes, etc.)
+ */
+router.put('/me/sessions/:id', authenticationMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { id } = req.params;
+    const { status, notes, meeting_link } = req.body;
+
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
+    });
+
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
+    }
+
+    // Verify session belongs to this mentor
+    const session = await prisma.mentorSessions.findFirst({
+      where: { 
+        id,
+        mentorId: mentor.id 
+      }
+    });
+
+    if (!session) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Session not found or unauthorized' 
+      });
+    }
+
+    const updated = await prisma.mentorSessions.update({
+      where: { id },
+      data: { 
+        status: status || session.status,
+        notes: notes !== undefined ? notes : session.notes,
+        meeting_link: meeting_link !== undefined ? meeting_link : session.meeting_link
+      },
+      include: {
+        student: {
+          include: {
+            user: {
+              select: { displayName: true, email: true }
+            }
+          }
+        }
+      }
+    });
+
+    res.json({ 
+      success: true,
+      message: 'Session updated successfully',
+      session: updated 
+    });
+  } catch (error) {
+    console.error('Error updating session:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to update session' 
+    });
   }
 });
 
 // ============================================
-// CREDITS SYSTEM
+// ASSIGNED STUDENTS
 // ============================================
 
-// GET STUDENT CREDITS
-router.get('/credits/my', authenticationMiddleware, async (req, res) => {
+/**
+ * GET /api/mentor/me/students
+ * Get all students assigned to this mentor
+ */
+router.get('/me/students', authenticationMiddleware, async (req, res) => {
   try {
-    // Check if user is authenticated
-    if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized - Please login' });
+    const userId = req.user.id;
+
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
+    });
+
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
     }
 
-    // Try different possible property names from JWT
-    const userId = req.user.userId || req.user.id || req.user.sub || req.user.user_id;
+    // Get unique students from sessions
+    const sessions = await prisma.mentorSessions.findMany({
+      where: { mentorId: mentor.id },
+      include: {
+        student: {
+          include: {
+            user: {
+              select: { 
+                id: true,
+                displayName: true,
+                email: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { scheduled_at: 'desc' }
+    });
+
+    // Group by student and count sessions
+    const studentMap = new Map();
     
-    console.log('JWT payload:', req.user);
-    console.log('Extracted userId:', userId);
+    sessions.forEach(session => {
+      const studentId = session.studentId;
+      if (!studentMap.has(studentId)) {
+        studentMap.set(studentId, {
+          id: session.student.id,
+          name: session.student.user?.displayName || 'Unknown',
+          email: session.student.user?.email,
+          totalSessions: 0,
+          completedSessions: 0,
+          upcomingSessions: 0,
+          lastSession: null
+        });
+      }
+      
+      const student = studentMap.get(studentId);
+      student.totalSessions++;
+      
+      if (session.status === 'completed') {
+        student.completedSessions++;
+      } else if (session.status === 'scheduled') {
+        student.upcomingSessions++;
+      }
+      
+      if (!student.lastSession || session.scheduled_at > student.lastSession) {
+        student.lastSession = session.scheduled_at;
+      }
+    });
 
-    if (!userId) {
-      return res.status(401).json({ error: 'User ID not found in token' });
+    const students = Array.from(studentMap.values());
+
+    res.json({ 
+      success: true,
+      students 
+    });
+  } catch (error) {
+    console.error('Error fetching students:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch students' 
+    });
+  }
+});
+
+/**
+ * GET /api/mentor/me/students/:studentId
+ * Get detailed info about a specific student
+ */
+router.get('/me/students/:studentId', authenticationMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { studentId } = req.params;
+
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
+    });
+
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
     }
 
-    // Find the user's profile
-    const userProfile = await prisma.profile.findUnique({
-      where: { userId: userId },
+    // Get student's sessions with this mentor
+    const sessions = await prisma.mentorSessions.findMany({
+      where: { 
+        mentorId: mentor.id,
+        studentId: studentId
+      },
+      include: {
+        student: {
+          include: {
+            user: {
+              select: { 
+                displayName: true,
+                email: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: { scheduled_at: 'desc' }
+    });
+
+    if (sessions.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Student not found or no sessions' 
+      });
+    }
+
+    const student = sessions[0].student;
+
+    res.json({ 
+      success: true,
+      student: {
+        id: student.id,
+        name: student.user?.displayName,
+        email: student.user?.email,
+        sessions: sessions.map(s => ({
+          id: s.id,
+          scheduled_at: s.scheduled_at,
+          topic: s.topic,
+          status: s.status,
+          notes: s.notes
+        }))
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching student details:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch student details' 
+    });
+  }
+});
+
+// ============================================
+// AVAILABILITY
+// ============================================
+
+/**
+ * GET /api/mentor/me/availability
+ * Get mentor's availability slots
+ */
+router.get('/me/availability', authenticationMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { 
+        id: true,
+        availability: true 
+      }
+    });
+
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
+    }
+
+    res.json({ 
+      success: true,
+      availability: mentor.availability || {} 
+    });
+  } catch (error) {
+    console.error('Error fetching availability:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch availability' 
+    });
+  }
+});
+
+/**
+ * PUT /api/mentor/me/availability
+ * Update mentor's availability
+ */
+router.put('/me/availability', authenticationMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { availability } = req.body;
+
+    const mentor = await prisma.mentors.findUnique({
+      where: { user_id: userId },
+      select: { id: true }
+    });
+
+    if (!mentor) {
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
+    }
+
+    const updated = await prisma.mentors.update({
+      where: { id: mentor.id },
+      data: { availability }
+    });
+
+    res.json({ 
+      success: true,
+      message: 'Availability updated successfully',
+      availability: updated.availability 
+    });
+  } catch (error) {
+    console.error('Error updating availability:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to update availability' 
+    });
+  }
+});
+
+// ============================================
+// PUBLIC MENTOR ROUTES
+// ============================================
+
+/**
+ * GET /api/mentor
+ * Get all mentors (public)
+ */
+router.get('/', async (req, res) => {
+  try {
+    const { expertise } = req.query;
+
+    const mentors = await prisma.mentors.findMany({
+      where: expertise ? { 
+        expertise: {
+          contains: expertise,
+          mode: 'insensitive'
+        }
+      } : undefined,
       include: {
         user: {
-          select: { id: true, displayName: true, email: true }
+          select: { 
+            id: true,
+            displayName: true,
+            email: true 
+          }
+        },
+        _count: {
+          select: { 
+            sessions: true,
+            reviews: true 
+          }
         }
-      }
-    });
-
-    if (!userProfile) {
-      return res.status(404).json({ error: 'Student profile not found' });
-    }
-
-    // Find credits using student_id
-    let credits = await prisma.credits.findFirst({
-      where: { student_id: userProfile.id }
-    });
-
-    if (!credits) {
-      credits = await prisma.credits.create({
-        data: {
-          student_id: userProfile.id,
-          credits_earned: 0
-        }
-      });
-    }
-
-    res.json({ credits });
-  } catch (error) {
-    console.error('Credits error:', error);
-    res.status(500).json({ error: 'Failed to fetch credits', details: error.message });
-  }
-});
-
-// ADD CREDITS (Admin/Faculty only)
-router.post('/credits/:studentId/add', authenticationMiddleware, async (req, res) => {
-  try {
-    const { studentId } = req.params;
-    const { amount, reason } = req.body;
-
-    // In production, add admin/faculty check here
-
-    // Find existing credits
-    const existingCredits = await prisma.credits.findFirst({
-      where: { student_id: studentId }
-    });
-
-    let credits;
-    if (existingCredits) {
-      credits = await prisma.credits.update({
-        where: { id: existingCredits.id },
-        data: {
-          credits_earned: existingCredits.credits_earned + amount
-        }
-      });
-    } else {
-      credits = await prisma.credits.create({
-        data: {
-          student_id: studentId,
-          credits_earned: amount
-        }
-      });
-    }
-
-    res.json({
-      message: `${amount} credits added`,
-      credits
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to add credits' });
-  }
-});
-
-// ============================================
-// NOTIFICATIONS
-// ============================================
-
-// GET MY NOTIFICATIONS
-router.get('/notifications/my', authenticationMiddleware, async (req, res) => {
-  try {
-    const userId = req.user.userId;
-
-    const notifications = await prisma.user_notifications.findMany({
-      where: { user_id: userId },
-      include: {
-        notification: true
       },
-      orderBy: { notification: { created_at: 'desc' } },
-      take: 50
+      orderBy: { rating: 'desc' }
     });
 
-    res.json({ notifications });
+    res.json({ 
+      success: true,
+      mentors 
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch notifications' });
+    console.error('Error fetching mentors:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch mentors' 
+    });
   }
 });
 
-// MARK NOTIFICATION AS READ
-router.patch('/notifications/:id/read', authenticationMiddleware, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.userId;
-
-    const notification = await prisma.user_notifications.updateMany({
-      where: {
-        id,
-        user_id: userId
-      },
-      data: {
-        isRead: true,
-        read_at: new Date()
-      }
-    });
-
-    res.json({ message: 'Marked as read' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to mark as read' });
-  }
-});
-
-// ============================================
-// DYNAMIC ROUTES - MUST BE LAST
-// ============================================
-
-// GET MENTOR BY ID
+/**
+ * GET /api/mentor/:id
+ * Get specific mentor profile (public)
+ */
 router.get('/:id', async (req, res) => {
   try {
     const { id } = req.params;
@@ -461,7 +694,10 @@ router.get('/:id', async (req, res) => {
       where: { id },
       include: {
         user: {
-          select: { id: true, displayName: true, email: true }
+          select: { 
+            displayName: true,
+            email: true 
+          }
         },
         reviews: {
           include: {
@@ -473,49 +709,86 @@ router.get('/:id', async (req, res) => {
               }
             }
           },
-          orderBy: { rating: 'desc' }
+          orderBy: { created_at: 'desc' },
+          take: 10
         },
-        sessions: {
-          where: { status: 'COMPLETED' },
-          orderBy: { scheduled_at: 'desc' }
+        _count: {
+          select: { sessions: true }
         }
       }
     });
 
     if (!mentor) {
-      return res.status(404).json({ error: 'Mentor not found' });
+      return res.status(404).json({ 
+        success: false,
+        error: 'Mentor not found' 
+      });
     }
 
-    res.json({ mentor });
+    res.json({ 
+      success: true,
+      mentor 
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch mentor details' });
+    console.error('Error fetching mentor:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to fetch mentor' 
+    });
   }
 });
 
-// GET REVIEWS FOR MENTOR
-router.get('/:mentorId/reviews', async (req, res) => {
+/**
+ * POST /api/mentor/register
+ * Register as a mentor (requires authentication)
+ */
+router.post('/register', authenticationMiddleware, async (req, res) => {
   try {
-    const { mentorId } = req.params;
+    const userId = req.user.id;
+    const { expertise, bio, experience } = req.body;
 
-    const reviews = await prisma.mentorReviews.findMany({
-      where: { mentorId },
-      include: {
-        student: {
-          include: {
-            user: {
-              select: { displayName: true }
-            }
-          }
-        }
-      },
-      orderBy: { rating: 'desc' }
+    // Check if already a mentor
+    const existingMentor = await prisma.mentors.findUnique({
+      where: { user_id: userId }
     });
 
-    res.json({ reviews });
+    if (existingMentor) {
+      return res.status(400).json({ 
+        success: false,
+        error: 'Already registered as mentor' 
+      });
+    }
+
+    const mentor = await prisma.mentors.create({
+      data: {
+        user_id: userId,
+        expertise: expertise || null,
+        experience: experience || null,
+        bio: bio || null,
+        rating: 0
+      },
+      include: {
+        user: {
+          select: { 
+            id: true,
+            displayName: true,
+            email: true 
+          }
+        }
+      }
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Mentor registration successful',
+      mentor
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch reviews' });
+    console.error('Error registering mentor:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to register as mentor' 
+    });
   }
 });
 

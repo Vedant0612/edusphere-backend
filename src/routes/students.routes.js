@@ -49,6 +49,7 @@ router.post('/', ensureAuthenticated, upload.any(), async (req, res) => {
       interests,
       department,
       resourceId,
+      graduationYear,
     } = req.body;
 
     if (!userId || !instituteId) {
@@ -108,6 +109,7 @@ router.post('/', ensureAuthenticated, upload.any(), async (req, res) => {
         interests: toStringArray(interests),
         department,
         resourceId,
+        graduationYear: graduationYear ? parseInt(graduationYear) : null,
       },
       include: {
         user: {
@@ -126,6 +128,160 @@ router.post('/', ensureAuthenticated, upload.any(), async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to create student profile' });
+  }
+});
+
+// GET STUDENT PROFILE BY USER ID
+router.get('/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const profile = await prisma.profile.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+            role: true,
+            phone: true,
+            graduationYear: true,
+          },
+        },
+        institution: {
+          select: {
+            id: true,
+            instituteName: true,
+            state: true,
+            city: true,
+          },
+        },
+        faculty: {
+          select: {
+            id: true,
+            name: true,
+            department: true,
+          },
+        },
+        portfolioProjects: true,
+        credits: true,
+        certificates: true,
+      },
+    });
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Student profile not found' });
+    }
+
+    res.json(profile);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch student profile' });
+  }
+});
+
+// UPDATE STUDENT PROFILE BY USER ID
+router.put('/user/:userId', ensureAuthenticated, upload.any(), async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    // Fetch existing profile
+    const existing = await prisma.profile.findUnique({
+      where: { userId },
+      select: { id: true, userId: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    // Authorization check
+    if (String(req.user.id) !== String(existing.userId)) {
+      return res.status(403).json({ error: 'Forbidden — you can only edit your own profile' });
+    }
+
+    // Handle file upload if present (avatar)
+    let uploadedAvatarURL;
+    const file = req.files && req.files.length > 0 ? req.files[0] : req.file;
+    if (file) {
+      try {
+        uploadedAvatarURL = await uploadOnCloudinary(file.path);
+      } catch (uploadError) {
+        console.error('Avatar upload failed:', uploadError);
+        return res.status(500).json({ error: 'Failed to upload avatar image' });
+      }
+    }
+
+    // Extract updatable fields
+    const {
+      bio,
+      gender,
+      DOB,
+      avatarURL,
+      github,
+      linkedin,
+      skills,
+      interests,
+      department,
+      resourceId,
+      graduationYear,
+    } = req.body;
+
+    const clean = (v) => (v === '' ? null : v === undefined ? undefined : v);
+
+    const data = {
+      bio: clean(bio),
+      gender: clean(gender),
+      DOB: DOB ? new Date(DOB) : undefined,
+      avatarURL: uploadedAvatarURL || clean(avatarURL),
+      github: clean(github),
+      linkedin: clean(linkedin),
+      skills: skills !== undefined ? toStringArray(skills) : undefined,
+      interests: interests !== undefined ? toStringArray(interests) : undefined,
+      department: clean(department),
+      resourceId: clean(resourceId),
+      graduationYear: graduationYear ? parseInt(graduationYear) : undefined,
+    };
+
+    // Remove undefined keys
+    Object.keys(data).forEach((k) => data[k] === undefined && delete data[k]);
+
+    if (Object.keys(data).length === 0) {
+      return res.status(400).json({ error: 'No updatable fields provided' });
+    }
+
+    const profile = await prisma.profile.update({
+      where: { userId },
+      data,
+      include: {
+        user: {
+          select: {
+            id: true,
+            email: true,
+            displayName: true,
+            role: true,
+            phone: true,
+          },
+        },
+        institution: {
+          select: {
+            id: true,
+            instituteName: true,
+            state: true,
+            city: true,
+          },
+        },
+      },
+    });
+
+    return res.status(200).json({ message: 'Profile updated successfully', profile });
+  } catch (error) {
+    console.error('Profile update error:', error);
+    if (error?.code === 'P2025') {
+      return res.status(404).json({ error: 'Student profile not found' });
+    }
+    return res.status(500).json({ error: 'Failed to update profile' });
   }
 });
 

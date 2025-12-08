@@ -25,7 +25,28 @@ const generateAccessToken = (user) => {
 // REGISTER USER
 router.post('/register', async (req, res) => {
   try {
-    const { displayName, email, password, role = [], phone } = req.body;
+    const { 
+      displayName, 
+      email, 
+      password, 
+      role, 
+      phone,
+      // Student specific
+      graduationYear,
+      instituteId,
+      department,
+      // Faculty specific
+      phoneCode,
+      phoneNumber,
+      // Mentor specific
+      expertise,
+      experience,
+      // Company specific
+      companyName,
+      website,
+      officialEmail,
+      contactName
+    } = req.body;
     
     // Validate required fields
     if (!displayName || !email || !password) {
@@ -59,22 +80,64 @@ router.post('/register', async (req, res) => {
       .update(password)
       .digest('hex');
 
-    // Create user
+    // Prepare phone number (combine phoneCode and phoneNumber if provided)
+    let fullPhone = phone || '';
+    if (phoneCode && phoneNumber) {
+      fullPhone = `${phoneCode}${phoneNumber}`;
+    }
+
+    // Create user with role-specific data
     const user = await prisma.users.create({
       data: {
         displayName,
         role: userRole,
         hashPassword: hash,
         salt,
-        phone: phone || '',
-        email
+        phone: fullPhone,
+        email,
+        graduationYear: graduationYear ? parseInt(graduationYear) : null,
       },
     });
+
+    // Create role-specific profiles
+    if (userRole === 'student' && instituteId) {
+      await prisma.profile.create({
+        data: {
+          userId: user.id,
+          instituteId,
+          department: department || null,
+          graduationYear: graduationYear ? parseInt(graduationYear) : null,
+        }
+      });
+    }
+
+    if (userRole === 'mentor') {
+      await prisma.mentors.create({
+        data: {
+          user_id: user.id,
+          expertise: expertise || null,
+          experience: experience || null,
+        }
+      });
+    }
+
+    if (userRole === 'company') {
+      await prisma.companies.create({
+        data: {
+          userId: user.id,
+          companyName: companyName || displayName,
+          website: website || null,
+          officialEmail: officialEmail || email,
+          contactName: contactName || displayName,
+        }
+      });
+    }
 
     res.status(201).json({ 
       message: 'User created successfully', 
       id: user.id,
-      role: user.role
+      role: user.role,
+      email: user.email
     });
     
   } catch (error) {
@@ -114,6 +177,33 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
 
+    // Fetch role-specific data
+    let roleData = {};
+    
+    if (user.role === 'student') {
+      const profile = await prisma.profile.findUnique({
+        where: { userId: user.id },
+        include: { institution: true }
+      });
+      roleData = { profile };
+    } else if (user.role === 'mentor') {
+      const mentor = await prisma.mentors.findUnique({
+        where: { user_id: user.id }
+      });
+      roleData = { mentor };
+    } else if (user.role === 'company') {
+      const company = await prisma.companies.findUnique({
+        where: { userId: user.id }
+      });
+      roleData = { company };
+    } else if (user.role === 'faculty') {
+      const faculty = await prisma.faculty.findUnique({
+        where: { userId: user.id },
+        include: { institution: true }
+      });
+      roleData = { faculty };
+    }
+
     // Generate access token
     const token = generateAccessToken(user);
 
@@ -125,7 +215,9 @@ router.post('/login', async (req, res) => {
         email: user.email,
         displayName: user.displayName,
         role: user.role,
-        phone: user.phone
+        phone: user.phone,
+        graduationYear: user.graduationYear,
+        ...roleData
       },
       token
     });

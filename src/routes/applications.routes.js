@@ -12,41 +12,40 @@ const prisma = new PrismaClient();
 router.post('/', ensureAuthenticated, async (req, res) => {
   try {
     const {
-      studentId,
-      internshipId,
-      coverLetter,
-      resumeUrl
+      student_id,
+      internship_id,
+      status,
+      submission_url
     } = req.body;
 
+    // Validate required fields
+    if (!student_id || !internship_id) {
+      return res.status(400).json({ error: 'student_id and internship_id are required' });
+    }
+
     // Check if student exists
-    const student = await prisma.student.findUnique({
-      where: { id: studentId }
+    const student = await prisma.profile.findUnique({
+      where: { id: student_id }
     });
 
     if (!student) {
-      return res.status(404).json({ error: 'Student not found' });
+      return res.status(404).json({ error: 'Student profile not found' });
     }
 
-    // Check if internship exists and is active
-    const internship = await prisma.internship.findUnique({
-      where: { id: internshipId }
+    // Check if internship exists
+    const internship = await prisma.internships.findUnique({
+      where: { id: internship_id }
     });
 
     if (!internship) {
       return res.status(404).json({ error: 'Internship not found' });
     }
 
-    if (!internship.isActive) {
-      return res.status(400).json({ error: 'Internship is not accepting applications' });
-    }
-
     // Check if already applied
-    const existingApplication = await prisma.internshipApplication.findUnique({
+    const existingApplication = await prisma.internship_applications.findFirst({
       where: {
-        studentId_internshipId: {
-          studentId,
-          internshipId
-        }
+        student_id,
+        internship_id
       }
     });
 
@@ -55,26 +54,34 @@ router.post('/', ensureAuthenticated, async (req, res) => {
     }
 
     // Create application
-    const application = await prisma.internshipApplication.create({
+    const application = await prisma.internship_applications.create({
       data: {
-        studentId,
-        internshipId,
-        coverLetter,
-        resumeUrl,
-        status: 'pending'
+        student_id,
+        internship_id,
+        status: status || 'APPLIED',
+        submission_url: submission_url || null,
+        applied_at: new Date()
       },
       include: {
         student: {
           include: {
             user: {
               select: {
-                name: true,
+                displayName: true,
                 email: true
               }
             }
           }
         },
-        internship: true
+        internship: {
+          include: {
+            company: {
+              select: {
+                companyName: true
+              }
+            }
+          }
+        }
       }
     });
 
@@ -83,8 +90,8 @@ router.post('/', ensureAuthenticated, async (req, res) => {
       application
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to submit application' });
+    console.error('Application creation error:', error);
+    res.status(500).json({ error: 'Failed to submit application', details: error.message });
   }
 });
 

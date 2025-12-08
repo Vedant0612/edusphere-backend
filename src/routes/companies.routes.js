@@ -11,7 +11,17 @@ const prisma = new PrismaClient();
 // Supports file upload for logo - if file present, uploads to Cloudinary
 router.post('/', upload.any(), async (req, res) => {
   try {
-    const { userId, companyName, industry, website, description, location, logoUrl } = req.body;
+    const { 
+      userId, 
+      companyName, 
+      industry, 
+      website, 
+      description, 
+      location, 
+      logoUrl,
+      officialEmail,
+      contactName 
+    } = req.body;
 
     if (!userId || !companyName) {
       return res.status(400).json({ error: 'userId and companyName are required' });
@@ -60,7 +70,9 @@ router.post('/', upload.any(), async (req, res) => {
         website,
         description,
         location,
-        logoUrl: uploadedLogoUrl
+        logoUrl: uploadedLogoUrl,
+        officialEmail: officialEmail || user.email,
+        contactName: contactName || user.displayName
       },
       include: {
         user: {

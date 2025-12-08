@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 // Use this endpoint only if faculty user exists but profile wasn't created
 router.post('/register', ensureAuthenticated, restrictToRole('admin', 'superAdmin'), ensureInstituteAccess, async (req, res) => {
     try {
-        const { instituteId, userId, department } = req.body;
+        const { instituteId, userId, department, phoneCode, phoneNumber } = req.body;
         const userRole = req.user.role;
         const requesterId = req.user.id;
 
@@ -62,6 +62,8 @@ router.post('/register', ensureAuthenticated, restrictToRole('admin', 'superAdmi
                 userId,
                 name: user.displayName,
                 department,
+                phoneCode: phoneCode || null,
+                phoneNumber: phoneNumber || null,
             },
             include: {
                 user: {
@@ -232,6 +234,105 @@ router.get('/me/profile', ensureAuthenticated, restrictToRole('faculty'), async 
     } catch (error) {
         console.error('Get my faculty profile error:', error);
         res.status(500).json({ error: 'Failed to fetch profile' });
+    }
+});
+
+// GET FACULTY DASHBOARD STATS (authenticated faculty)
+router.get('/me/stats', ensureAuthenticated, restrictToRole('faculty'), async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Get faculty profile
+        const faculty = await prisma.faculty.findUnique({
+            where: { userId },
+            select: { id: true }
+        });
+
+        if (!faculty) {
+            return res.status(404).json({ error: 'Faculty profile not found' });
+        }
+
+        // Get total students count
+        const totalStudents = await prisma.profile.count({
+            where: { facultyId: faculty.id }
+        });
+
+        // Get pending evaluations (those with status 'pending' or null)
+        const pendingReviews = await prisma.evaluations.count({
+            where: { 
+                facultyId: faculty.id,
+                status: 'pending'
+            }
+        });
+
+        // Get active classes count (assuming we count unique departments or courses)
+        // For now, we'll return 0 as classes table doesn't exist
+        const activeClasses = 0;
+
+        // Calculate average attendance (placeholder until attendance tracking is implemented)
+        const avgAttendance = 0;
+
+        // Get recent pending evaluations
+        const recentReviews = await prisma.evaluations.findMany({
+            where: {
+                facultyId: faculty.id,
+                status: 'pending'
+            },
+            include: {
+                student: {
+                    include: {
+                        user: {
+                            select: {
+                                displayName: true
+                            }
+                        }
+                    }
+                },
+                logbookEntry: {
+                    select: {
+                        taskDone: true,
+                        createdAt: true
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 5
+        });
+
+        // Get recent students with their status
+        const recentStudents = await prisma.profile.findMany({
+            where: { facultyId: faculty.id },
+            include: {
+                user: {
+                    select: {
+                        displayName: true
+                    }
+                },
+                internshipApplications: {
+                    select: {
+                        status: true
+                    },
+                    take: 1,
+                    orderBy: { appliedAt: 'desc' }
+                }
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 4
+        });
+
+        res.json({ 
+            stats: {
+                pendingReviews,
+                totalStudents,
+                activeClasses,
+                avgAttendance
+            },
+            recentReviews,
+            recentStudents
+        });
+    } catch (error) {
+        console.error('Get faculty stats error:', error);
+        res.status(500).json({ error: 'Failed to fetch stats' });
     }
 });
 
@@ -499,19 +600,92 @@ router.get('/:id/advisees', ensureAuthenticated, async (req, res) => {
     }
 });
 
-// GET COURSE ANALYTICS (placeholder - requires courses implementation)
-router.get('/:id/reports/course/:courseId', ensureAuthenticated, restrictToRole('faculty', 'admin', 'superAdmin'), async (req, res) => {
+// GET PENDING REVIEWS FOR FACULTY
+router.get('/me/pending-reviews', ensureAuthenticated, restrictToRole('faculty'), async (req, res) => {
     try {
-        const { id, courseId } = req.params;
+        const userId = req.user.id;
 
-        // TODO: Implement course analytics when courses module is ready
-        res.status(501).json({ 
-            message: 'Course analytics not yet implemented',
-            note: 'This endpoint will be available when courses module is completed'
+        const faculty = await prisma.faculty.findUnique({
+            where: { userId },
+            select: { id: true }
         });
+
+        if (!faculty) {
+            return res.status(404).json({ error: 'Faculty profile not found' });
+        }
+
+        const pendingReviews = await prisma.evaluations.findMany({
+            where: {
+                facultyId: faculty.id,
+                status: 'pending'
+            },
+            include: {
+                student: {
+                    include: {
+                        user: {
+                            select: {
+                                displayName: true
+                            }
+                        }
+                    }
+                },
+                logbookEntry: {
+                    select: {
+                        taskDone: true,
+                        createdAt: true,
+                        description: true
+                    }
+                }
+            },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        res.json({ reviews: pendingReviews });
     } catch (error) {
-        console.error('Get course analytics error:', error);
-        res.status(500).json({ error: 'Failed to fetch analytics' });
+        console.error('Get pending reviews error:', error);
+        res.status(500).json({ error: 'Failed to fetch pending reviews' });
+    }
+});
+
+// UPDATE EVALUATION STATUS (Approve/Request Changes)
+router.patch('/me/reviews/:reviewId', ensureAuthenticated, restrictToRole('faculty'), async (req, res) => {
+    try {
+        const { reviewId } = req.params;
+        const { status, feedback, scores } = req.body;
+        const userId = req.user.id;
+
+        const faculty = await prisma.faculty.findUnique({
+            where: { userId },
+            select: { id: true }
+        });
+
+        if (!faculty) {
+            return res.status(404).json({ error: 'Faculty profile not found' });
+        }
+
+        // Verify the evaluation belongs to this faculty
+        const evaluation = await prisma.evaluations.findUnique({
+            where: { id: reviewId }
+        });
+
+        if (!evaluation || evaluation.facultyId !== faculty.id) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+
+        const updated = await prisma.evaluations.update({
+            where: { id: reviewId },
+            data: {
+                status,
+                feedback: feedback || null,
+                score: scores ? JSON.stringify(scores) : null,
+                reviewedAt: new Date()
+            }
+        });
+
+        res.json({ evaluation: updated });
+    } catch (error) {
+        console.error('Update review error:', error);
+        res.status(500).json({ error: 'Failed to update review' });
     }
 });
 

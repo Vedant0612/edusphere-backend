@@ -340,4 +340,30 @@ router.delete('/:id', ensureAuthenticated, async (req, res) => {
   }
 });
 
+// GET USER ENROLLMENTS (courses enrolled by user)
+router.get('/:id/enrollments', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get user's student profile
+    const profile = await prisma.profile.findUnique({
+      where: { userId: id },
+      select: { id: true }
+    });
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Student profile not found' });
+    }
+
+    // For now, return empty array as enrollment schema needs to be defined
+    // TODO: Add course enrollment schema and populate this endpoint
+    const enrollments = [];
+
+    res.json(enrollments);
+  } catch (error) {
+    console.error('Get enrollments error:', error);
+    res.status(500).json({ error: 'Failed to fetch enrollments' });
+  }
+});
+
 module.exports = router;

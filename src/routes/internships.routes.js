@@ -224,6 +224,14 @@ router.get('/', async (req, res) => {
     const internships = await prisma.internships.findMany({
       where,
       include: {
+        company: {
+          select: {
+            companyName: true,
+            description: true,
+            logoUrl: true,
+            location: true
+          }
+        },
         _count: {
           select: { applications: true }
         }
