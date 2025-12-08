@@ -4,6 +4,7 @@
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const { ensureAuthenticated, restrictToRole } = require('../middleware/auth');
+const whatsappService = require('../services/whatsapp.service');
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -189,12 +190,87 @@ router.patch('/:id/status', ensureAuthenticated, async (req, res) => {
       include: {
         student: {
           include: {
-            user: true
+            user: {
+              select: {
+                id: true,
+                displayName: true,
+                phoneNumber: true,  // ✅ Add this
+                email: true
+              }
+            }
           }
         },
-        internship: true
+        internship: {
+          select: {
+            id: true,
+            title: true,
+            companyName: true,
+            position: true
+          }
+        }
       }
     });
+
+    // ============================================
+    // 📱 SEND WHATSAPP NOTIFICATION
+    // ============================================
+    if (application.student?.user?.phoneNumber) {
+      const phoneNumber = application.student.user.phoneNumber;
+      const studentName = application.student.user.displayName;
+      const companyName = application.internship.companyName;
+      const position = application.internship.position || application.internship.title;
+
+      // Create custom message based on status
+      let message = '';
+      
+      if (status === 'accepted') {
+        message = `🎉 Congratulations ${studentName}!
+
+Your application for *${position}* at *${companyName}* has been *ACCEPTED*!
+
+Next Steps:
+✅ Check your dashboard for onboarding details
+✅ You'll receive further instructions soon
+
+Best of luck with your internship! 🚀
+
+- Prashikshan Team`;
+      } else if (status === 'rejected') {
+        message = `Hi ${studentName},
+
+We regret to inform you that your application for *${position}* at *${companyName}* was not successful this time.
+
+${rejectionReason ? `Reason: ${rejectionReason}` : ''}
+
+Don't lose hope! Keep applying to other opportunities. 💪
+
+- Prashikshan Team`;
+      } else if (status === 'pending') {
+        message = `Hi ${studentName},
+
+Your application for *${position}* at *${companyName}* is now under review.
+
+We'll notify you once there's an update. 📋
+
+- Prashikshan Team`;
+      }
+
+      // Send WhatsApp notification
+      try {
+        await whatsappService.notifyApplicationStatus(
+          phoneNumber,
+          studentName,
+          companyName,
+          status
+        );
+        console.log(`✅ WhatsApp notification sent to ${phoneNumber}`);
+      } catch (whatsappError) {
+        // Log error but don't fail the request
+        console.error('❌ Failed to send WhatsApp notification:', whatsappError.message);
+      }
+    } else {
+      console.log('⚠️ No phone number found for student, skipping WhatsApp notification');
+    }
 
     res.json({
       message: `Application ${status}`,

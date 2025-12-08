@@ -95,7 +95,7 @@ router.post('/register', async (req, res) => {
         salt,
         phone: fullPhone,
         email,
-        graduationYear: graduationYear ? parseInt(graduationYear) : null,
+        
       },
     });
 
@@ -106,7 +106,7 @@ router.post('/register', async (req, res) => {
           userId: user.id,
           instituteId,
           department: department || null,
-          graduationYear: graduationYear ? parseInt(graduationYear) : null,
+          
         }
       });
     }
@@ -137,7 +137,8 @@ router.post('/register', async (req, res) => {
       message: 'User created successfully', 
       id: user.id,
       role: user.role,
-      email: user.email
+      email: user.email,
+      token: generateAccessToken(user)
     });
     
   } catch (error) {
@@ -216,7 +217,7 @@ router.post('/login', async (req, res) => {
         displayName: user.displayName,
         role: user.role,
         phone: user.phone,
-        graduationYear: user.graduationYear,
+        
         ...roleData
       },
       token

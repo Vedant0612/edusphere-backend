@@ -1,26 +1,33 @@
 // src/routes/internships.js
 // ⚠️ DEPRECATED: This file is superseded by jobs.routes.js
-// Consider migrating to the new routes or removing this file
+// ⚠️ NOTE: Most internship CRUD functionality has been moved to /api/jobs route
+// ⚠️ This file is kept for backwards compatibility with SMS notification feature
+// ⚠️ Consider using /api/jobs for new implementations
 const express = require('express');
 const { PrismaClient } = require('@prisma/client');
-const { ensureAuthenticated, restrictToRole } = require('../middleware/auth');
+const { authenticationMiddleware, ensureAuthenticated, restrictToRole } = require('../middleware/auth');
 const twilio = require('twilio');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
 // Initialize Twilio client
+// Initialize Twilio clients
 const twilioClient = process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
   ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
   : null;
 
+const twilioWhatsAppClient = process.env.TWILIO_WHATSAPP_ACCOUNT_SID && process.env.TWILIO_WHATSAPP_AUTH_TOKEN
+  ? twilio(process.env.TWILIO_WHATSAPP_ACCOUNT_SID, process.env.TWILIO_WHATSAPP_AUTH_TOKEN)
+  : null;
+
 const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
+const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER;
 
 // Helper function to count matching skills
 function countMatchingSkills(studentSkills, requiredSkills) {
   if (!studentSkills || !requiredSkills) return 0;
   
-  // Normalize skills to lowercase for comparison
   const normalizedStudentSkills = studentSkills.map(skill => skill.toLowerCase().trim());
   const normalizedRequiredSkills = requiredSkills.map(skill => skill.toLowerCase().trim());
   
@@ -33,25 +40,20 @@ function countMatchingSkills(studentSkills, requiredSkills) {
 function formatPhoneNumber(phone) {
   if (!phone) return null;
   
-  // Remove all spaces, dashes, and brackets
   let cleaned = phone.replace(/[\s\-\(\)]/g, '');
   
-  // If already has +, return as is
   if (cleaned.startsWith('+')) {
     return cleaned;
   }
   
-  // If starts with 91 (India country code), add +
   if (cleaned.startsWith('91') && cleaned.length === 12) {
     return '+' + cleaned;
   }
   
-  // If 10 digits, assume Indian number and add +91
   if (cleaned.length === 10) {
     return '+91' + cleaned;
   }
   
-  // Otherwise, return as is (might be invalid)
   return '+' + cleaned;
 }
 
@@ -62,7 +64,6 @@ async function sendInternshipSMS(phoneNumber, internshipTitle, companyName, matc
     return null;
   }
 
-  // Format phone number to E.164
   const formattedPhone = formatPhoneNumber(phoneNumber);
   
   if (!formattedPhone) {
@@ -84,9 +85,95 @@ async function sendInternshipSMS(phoneNumber, internshipTitle, companyName, matc
   }
 }
 
-// CREATE INTERNSHIP (admin/industry only)
-router.post('/', ensureAuthenticated, async (req, res) => {
+// Helper function to send WhatsApp via Twilio
+// Helper function to send WhatsApp via Twilio
+async function sendInternshipWhatsApp(phoneNumber, internshipTitle, companyName, matchingSkillsCount) {
+  if (!twilioWhatsAppClient || !TWILIO_WHATSAPP_NUMBER) {
+    console.log('Twilio WhatsApp not configured.');
+    return null;
+  }
+
+  const formattedPhone = formatPhoneNumber(phoneNumber);
+  
+  if (!formattedPhone) {
+    console.log('Invalid phone number format');
+    return null;
+  }
+
+  // Format WhatsApp numbers correctly
+  const fromNumber = TWILIO_WHATSAPP_NUMBER.startsWith('whatsapp:') 
+    ? TWILIO_WHATSAPP_NUMBER 
+    : `whatsapp:${TWILIO_WHATSAPP_NUMBER}`;
+  
+  const toNumber = `whatsapp:${formattedPhone}`;
+
   try {
+    const message = await twilioWhatsAppClient.messages.create({
+      body: `🎓 *New Internship Alert!*\n\n"${internshipTitle}" at ${companyName || 'Company'}\n\n✅ ${matchingSkillsCount} of your skills match!\n\nCheck the portal for details and apply now!`,
+      from: fromNumber,
+      to: toNumber
+    });
+    
+    console.log(`✅ WhatsApp sent to ${phoneNumber}`);
+    return message;
+  } catch (error) {
+    console.error(`❌ Failed to send WhatsApp to ${toNumber}:`, error.message);
+    return null;
+  }
+}
+
+// Helper function to send WhatsApp update notification
+// Helper function to send WhatsApp update notification
+async function sendWhatsAppUpdate(phoneNumber, internshipTitle, companyName) {
+  if (!twilioWhatsAppClient || !TWILIO_WHATSAPP_NUMBER) {
+    console.log('Twilio WhatsApp not configured.');
+    return null;
+  }
+
+  const formattedPhone = formatPhoneNumber(phoneNumber);
+  
+  if (!formattedPhone) {
+    console.log('Invalid phone number format');
+    return null;
+  }
+
+  // Format WhatsApp numbers correctly
+  const fromNumber = TWILIO_WHATSAPP_NUMBER.startsWith('whatsapp:') 
+    ? TWILIO_WHATSAPP_NUMBER 
+    : `whatsapp:${TWILIO_WHATSAPP_NUMBER}`;
+  
+  const toNumber = `whatsapp:${formattedPhone}`;
+
+  try {
+    const message = await twilioWhatsAppClient.messages.create({
+      body: `🔔 *Internship Update Alert!*\n\n"${internshipTitle}" at ${companyName || 'Company'} has been updated!\n\nCheck the portal for latest details!`,
+      from: fromNumber,
+      to: toNumber
+    });
+    
+    console.log(`✅ WhatsApp update sent to ${phoneNumber}`);
+    return message;
+  } catch (error) {
+    console.error(`❌ Failed to send WhatsApp to ${toNumber}:`, error.message);
+    return null;
+  }
+}
+// CREATE INTERNSHIP (admin/industry only)
+router.post('/', authenticationMiddleware, ensureAuthenticated, restrictToRole('admin', 'company'), async (req, res) => {
+  try {
+    // Debug: Check if user is authenticated
+    console.log('🔍 Authenticated user:', {
+      id: req.user.id,
+      role: req.user.role,
+      email: req.user.email
+    });
+    
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ 
+        error: 'User not authenticated or user ID missing'
+      });
+    }
+
     const {
       title,
       description,
@@ -94,15 +181,55 @@ router.post('/', ensureAuthenticated, async (req, res) => {
       stipend,
       location,
       required_skills,
-      duration_weeks,
-      industry_user_id
+      duration_weeks
     } = req.body;
+
+    // Use authenticated user's ID
+    const industry_user_id = req.user.id;
+
+    console.log('📥 Creating internship:', {
+      title,
+      type,
+      industry_user_id,
+      userRole: req.user.role,
+      userEmail: req.user.email
+    });
+
+    // Validate required fields
+    if (!title || !description || !type || !location || !duration_weeks) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        required: ['title', 'description', 'type', 'location', 'duration_weeks', 'required_skills']
+      });
+    }
 
     // Validate required_skills is an array
     if (!Array.isArray(required_skills) || required_skills.length === 0) {
       return res.status(400).json({ error: 'required_skills must be a non-empty array' });
     }
 
+    // Get company_id and name for the authenticated user
+    let company_id = null;
+    let companyName = 'Company';
+    
+    try {
+      const company = await prisma.companies.findUnique({
+        where: { userId: industry_user_id },
+        select: { id: true, companyName: true }
+      });
+      
+      if (company) {
+        company_id = company.id;
+        companyName = company.companyName;
+        console.log(`✅ Found company: ${companyName} (${company_id})`);
+      } else {
+        console.log('⚠️  No company profile found for this user');
+      }
+    } catch (err) {
+      console.log('⚠️  Error fetching company:', err.message);
+    }
+
+    // Create internship
     const internship = await prisma.internships.create({
       data: {
         title,
@@ -110,28 +237,44 @@ router.post('/', ensureAuthenticated, async (req, res) => {
         type,
         stipend: stipend ? parseFloat(stipend) : null,
         location,
-        required_skills: JSON.stringify(required_skills),
+        required_skills: required_skills, // Prisma handles JSON automatically
         duration_weeks: parseInt(duration_weeks),
         created_at: new Date(),
-        industry_user_id
+        industry_user_id,
+        company_id,
+        isActive: true
       }
     });
 
-    // Get company name for SMS
-    let companyName = 'Company';
-    if (industry_user_id) {
-      const company = await prisma.companies.findUnique({
-        where: { userId: industry_user_id },
-        select: { companyName: true }
-      });
-      companyName = company?.companyName || 'Company';
-    }
+    console.log('✅ Internship created:', internship.id);
+    //here i want to send a message saying internship created 
+    console.log('✅ Internship created:', internship.id);
+
+// Send simple WhatsApp confirmation
+if (twilioWhatsAppClient && TWILIO_WHATSAPP_NUMBER) {
+  try {
+    const fromNumber = TWILIO_WHATSAPP_NUMBER.startsWith('whatsapp:') 
+      ? TWILIO_WHATSAPP_NUMBER 
+      : `whatsapp:${TWILIO_WHATSAPP_NUMBER}`;
+
+    await twilioWhatsAppClient.messages.create({
+      body: `✅ Internship "${title}" created successfully!`,
+      from: fromNumber,
+      to: `whatsapp:+918921811139`  // Replace with your phone number
+    });
+    
+    console.log('✅ WhatsApp confirmation sent');
+  } catch (error) {
+    console.error('❌ WhatsApp failed:', error.message);
+  }
+}
+
 
     // Find students with matching skills (minimum 2 matches)
     const allStudents = await prisma.profile.findMany({
       where: {
         skills: {
-          isEmpty: false // Only get students who have skills listed
+          isEmpty: false
         }
       },
       include: {
@@ -153,63 +296,93 @@ router.post('/', ensureAuthenticated, async (req, res) => {
 
     console.log(`Found ${matchingStudents.length} students with matching skills (minimum 2)`);
 
-    // Send SMS notifications asynchronously (don't wait for completion)
-    if (twilioClient && matchingStudents.length > 0) {
-      // Send SMS in background without blocking response
+    // Send notifications asynchronously
+    if (matchingStudents.length > 0) {
       Promise.all(
         matchingStudents.map(async (student) => {
           if (!student.user.phone || student.user.phone.trim() === '') {
-            console.log(`Skipping SMS for ${student.user.displayName} - no phone number`);
-            return null;
+            console.log(`⏭️  Skipping notifications for ${student.user.displayName} - no phone number`);
+            return { sms: null, whatsapp: null };
           }
 
           const matchCount = countMatchingSkills(student.skills, required_skills);
           
+          // Send SMS
+          let smsResult = null;
+          if (twilioClient) {
+            try {
+              smsResult = await sendInternshipSMS(
+                student.user.phone,
+                title,
+                companyName,
+                matchCount
+              );
+              
+              if (smsResult) {
+                console.log(`✅ SMS sent to ${student.user.displayName}`);
+              }
+            } catch (error) {
+              console.error(`❌ SMS error for ${student.user.displayName}:`, error.message);
+            }
+          }
+
+          // Send WhatsApp
+          let whatsappResult = null;
           try {
-            const result = await sendInternshipSMS(
+            whatsappResult = await sendInternshipWhatsApp(
               student.user.phone,
               title,
               companyName,
               matchCount
             );
             
-            if (result) {
-              console.log(`SMS sent to ${student.user.displayName} (${student.user.phone})`);
+            if (whatsappResult) {
+              console.log(`✅ WhatsApp sent to ${student.user.displayName}`);
             }
-            
-            return result;
           } catch (error) {
-            console.error(`Error sending SMS to ${student.user.displayName}:`, error);
-            return null;
+            console.error(`❌ WhatsApp error for ${student.user.displayName}:`, error.message);
           }
+          
+          return { sms: smsResult, whatsapp: whatsappResult };
         })
       ).then((results) => {
-        const successCount = results.filter(r => r !== null).length;
-        console.log(`SMS notification summary: ${successCount}/${matchingStudents.length} sent successfully`);
+        const smsSuccess = results.filter(r => r.sms !== null).length;
+        const whatsappSuccess = results.filter(r => r.whatsapp !== null).length;
+        console.log(`📊 Notification summary:`);
+        console.log(`   📱 SMS: ${smsSuccess}/${matchingStudents.length} sent`);
+        console.log(`   💬 WhatsApp: ${whatsappSuccess}/${matchingStudents.length} sent`);
       }).catch(err => {
-        console.error('Error in SMS batch sending:', err);
+        console.error('❌ Error in notification batch sending:', err);
       });
-    } else if (!twilioClient) {
-      console.log('Twilio not configured. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER to .env');
     }
 
     res.status(201).json({
-      message: 'Internship created',
+      message: 'Internship created successfully',
       internship: {
         ...internship,
-        required_skills: JSON.parse(internship.required_skills)
+        required_skills: internship.required_skills
       },
-      notificationsSent: twilioClient ? matchingStudents.length : 0,
-      matchingStudents: matchingStudents.length
+      notifications: {
+        smsAttempted: twilioClient ? matchingStudents.length : 0,
+        whatsappAttempted: matchingStudents.length,
+        matchingStudents: matchingStudents.length
+      }
     });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to create internship' });
+    console.error('❌ Error creating internship:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      meta: error.meta
+    });
+    
+    res.status(500).json({ 
+      error: 'Failed to create internship',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
-
-
-
 
 // GET ALL INTERNSHIPS (with filters)
 router.get('/', async (req, res) => {
@@ -241,12 +414,8 @@ router.get('/', async (req, res) => {
       }
     });
 
-    // Parse required_skills JSON if it's a string
     const formattedInternships = internships.map(internship => ({
       ...internship,
-      required_skills: typeof internship.required_skills === 'string' 
-        ? JSON.parse(internship.required_skills) 
-        : internship.required_skills,
       applicationsCount: internship._count.applications
     }));
 
@@ -265,6 +434,14 @@ router.get('/:id', async (req, res) => {
     const internship = await prisma.internships.findUnique({
       where: { id },
       include: {
+        company: {
+          select: {
+            companyName: true,
+            description: true,
+            logoUrl: true,
+            location: true
+          }
+        },
         applications: {
           include: {
             student: {
@@ -286,11 +463,6 @@ router.get('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Internship not found' });
     }
 
-    // Parse required_skills if it's a string
-    if (typeof internship.required_skills === 'string') {
-      internship.required_skills = JSON.parse(internship.required_skills);
-    }
-
     res.json({ internship });
   } catch (error) {
     console.error(error);
@@ -299,15 +471,10 @@ router.get('/:id', async (req, res) => {
 });
 
 // UPDATE INTERNSHIP (requires authentication)
-router.put('/:id', ensureAuthenticated, restrictToRole('admin','company'), async (req, res) => {
+router.put('/:id', authenticationMiddleware, ensureAuthenticated, restrictToRole('admin','company'), async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
-
-    // Convert skills array to JSON string if it's an array
-    if (updateData.required_skills && Array.isArray(updateData.required_skills)) {
-      updateData.required_skills = JSON.stringify(updateData.required_skills);
-    }
 
     // Parse duration_weeks to int if it exists
     if (updateData.duration_weeks) {
@@ -324,11 +491,6 @@ router.put('/:id', ensureAuthenticated, restrictToRole('admin','company'), async
       data: updateData
     });
 
-    // Parse required_skills for response if it's a string
-    if (typeof internship.required_skills === 'string') {
-      internship.required_skills = JSON.parse(internship.required_skills);
-    }
-
     res.json({
       message: 'Internship updated',
       internship
@@ -340,7 +502,7 @@ router.put('/:id', ensureAuthenticated, restrictToRole('admin','company'), async
 });
 
 // DELETE INTERNSHIP (admin only)
-router.delete('/:id', ensureAuthenticated, restrictToRole('admin','company'), async (req, res) => {
+router.delete('/:id', authenticationMiddleware, ensureAuthenticated, restrictToRole('admin','company'), async (req, res) => {
   try {
     const { id } = req.params;
 
